@@ -49,6 +49,11 @@ struct AdiFile {
 // AdiHeader: represents the header in an ADI file, if present.
 //
 
+struct AdiHeader {
+    pub adih_content : String,                      // complete header content
+    pub adih_fields : Vec<AdiHeaderDataSpecifier>   // header data specifiers
+}
+
 #[allow(non_camel_case_types)]
 enum AdiHeaderDataSpecifierType {
     HST_ADIF_VERSION,   /* standard adif version field */
@@ -63,11 +68,6 @@ struct AdiHeaderDataSpecifier {
     pub adihf_length : u64,
     pub adihf_bytes : String, // XXX
     pub adihf_type : Option<String> // XXX should be a Type enum
-}
-
-struct AdiHeader {
-    pub adih_content : String,                      // complete header content
-    pub adih_fields : Vec<AdiHeaderDataSpecifier>   // header data specifiers
 }
 
 //
@@ -86,8 +86,27 @@ struct AdiDataSpecifier {
     pub adif_type : Option<String> // XXX should be a Type enum
 }
 
+// TODO this is an unpolished API for playing around.
 fn adi_export(adf : AdiFile) -> String {
-    String::from("not yet implemented")
+    let mut output = String::new();
+
+    match adf.adi_header {
+        None => output.push_str("no header"),
+        Some(adh) => {
+            output.push_str(&adh.adih_content);
+            output.push_str("<eoh>");
+        },
+    }
+
+    for rec in &adf.adi_records {
+        adi_export_record(rec, &mut output);
+    }
+
+    output
+}
+
+fn adi_export_record(rec : &AdiRecord, output: &mut String) {
+    output.push_str("record!");
 }
 
 
