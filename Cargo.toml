@@ -1,0 +1,6 @@
+[package]
+name = "adif"
+version = "0.1.0"
+authors = ["David Pacheco <dap@cs.brown.edu>"]
+
+[dependencies]
