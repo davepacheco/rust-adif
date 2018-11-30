@@ -137,7 +137,10 @@ fn adi_export_record(rec : &AdiRecord, output: &mut String) {
 
 use std::io;
 use std::io::BufRead;
+use std::io::BufReader;
+use std::io::Cursor;
 
+#[allow(non_camel_case_types)]
 pub enum AdiParseError {
     ADI_IO(io::Error),
     ADI_BADINPUT(String),
@@ -150,12 +153,63 @@ impl From<io::Error> for AdiParseError {
     }
 }
 
+#[derive(PartialEq)]
+#[allow(non_camel_case_types)]
 enum AdiToken {
     ADI_TOK_TEXT(String),
     ADI_TOK_LAB,    /* '<' */
     ADI_TOK_COLON,  /* ':' */
     ADI_TOK_RAB,    /* '>' */
     ADI_TOK_EOF
+}
+
+pub fn adi_import_test(input : &str) {
+    println!("\n\ntokenzing string:\n{}\n\n", input);
+
+    let source = Cursor::new(input);
+    let mut buffered = BufReader::new(source);
+    let mut maxiters = 100;
+
+    loop {
+        if maxiters == 0 {
+            panic!("bailing out after max tokens reached!");
+            return;
+        }
+        maxiters -= 1;
+
+        let rtoken = adi_import_read_token(&mut buffered);
+        match rtoken {
+            Err(AdiParseError::ADI_IO(ioe)) => {
+                println!("unexpected I/O error: {}", ioe);
+                return;
+            },
+            Err(AdiParseError::ADI_BADINPUT(msg)) => {
+                println!("bad input: {}", msg);
+                return;
+            },
+            Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED) => {
+                println!("not yet implemented");
+                return;
+            },
+
+            Ok(AdiToken::ADI_TOK_LAB) => {
+                println!("token: '<'");
+            },
+            Ok(AdiToken::ADI_TOK_RAB) => {
+                println!("token: '>'");
+            },
+            Ok(AdiToken::ADI_TOK_COLON) => {
+                println!("token: ':'");
+            },
+            Ok(AdiToken::ADI_TOK_TEXT(t)) => {
+                 println!("token: raw text: {}", t);
+            },
+            Ok(AdiToken::ADI_TOK_EOF) => {
+                println!("token: EOF");
+                return;
+            }
+        }
+    }
 }
 
 fn adi_import_read_token(source : &mut BufRead) ->
@@ -190,7 +244,21 @@ fn adi_import_read_token(source : &mut BufRead) ->
         let mut i = 0;
         loop {
             let c = buf[i] as char;
-            if !c.is_ascii() || c.is_ascii_control() {
+
+            //
+            // TODO This validation is going to eventually have to move to a
+            // higher level of parsing, because technically arbitrary byte
+            // sequences can appear here.
+            // There also seems to be a bug in the spec, in that the header is
+            // defined to be a String, yet the examples contain newlines.  This
+            // appears intended to include MultilineString.
+            // Even so, the following validation isn't quite right, because
+            // MultiLine strings are only allowed to contain CR/LF
+            // consecutively, not a naked CR or LF or the reverse order, but
+            // we're not validating that here.
+            //
+            if !c.is_ascii() ||
+               (c.is_ascii_control() && c != '\r' && c != '\n') {
                 // TODO add byte offset
                 return Err(AdiParseError::ADI_BADINPUT(format!(
                     "expected ASCII character, but found byte 0x{:x}",
@@ -311,6 +379,12 @@ mod test {
         println!("{}", super::adi_export(adf));
         let adf = make_file_complex();
         println!("{}", super::adi_export(adf));
+        super::adi_import_test(r#"
+            header stuff here<eoh>
+            <call:6>KK6ZBI
+            <bupkis:3>123
+            <eor>
+        "#);
         // XXX test something
     }
 }

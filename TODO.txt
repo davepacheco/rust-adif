@@ -1,12 +1,9 @@
 Current status:
 
 - Build the ADI parser that takes a raw string and generates an AdiFile?
-  - Working on adi_import_read_token().
-    Next steps:
-    - build a wrapper function that invokes it in a loop on an input stream and
-      prints out each of the tokens.
+  - Build a new function that uses adi_import_read_token() to parse the file
 - Back to the structures for the "physical" representation of the file ("ADI").
-  - See XXXs.
+  - See XXXs and TODOs
   - Build out physical types?
 - Build the higher level, in terms of an AdifFile (as opposed to AdiFile?) with
   an AdifHeader and list of AdifRecords (which would have maps of field names to
