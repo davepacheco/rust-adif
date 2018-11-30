@@ -1,6 +1,13 @@
 Current status:
 
 - Build the ADI parser that takes a raw string and generates an AdiFile?
+  - Working on adi_import_read_token().
+    Next steps:
+    - hit my first hard borrow checker error!  Not sure how to resolve it.
+      See example in docs:
+      https://doc.rust-lang.org/std/io/trait.BufRead.html#examples-1
+    - build a wrapper function that invokes it in a loop on an input stream and
+      prints out each of the tokens.
 - Back to the structures for the "physical" representation of the file ("ADI").
   - See XXXs.
   - Build out physical types?

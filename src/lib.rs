@@ -40,7 +40,7 @@ enum AdifFileType {
 // AdiFile: represents a complete ADI file.  This structure is not compatible
 // with a streaming parser, but we're not looking to build one here.
 //
-struct AdiFile {
+pub struct AdiFile {
     pub adi_header : Option<AdiHeader>,   // file header, if present
     pub adi_records : Vec<AdiRecord>    // list of records in the file
 }
@@ -49,7 +49,7 @@ struct AdiFile {
 // AdiHeader: represents the header in an ADI file, if present.
 //
 
-struct AdiHeader {
+pub struct AdiHeader {
     pub adih_content : String,                      // complete header content
     pub adih_fields : Vec<AdiHeaderDataSpecifier>   // header data specifiers
 }
@@ -61,7 +61,7 @@ pub enum AdiHeaderDataSpecifierType {
     HST_APP             /* application-defined field */
 }
 
-struct AdiHeaderDataSpecifier {
+pub struct AdiHeaderDataSpecifier {
     pub adihf_fieldtype : AdiHeaderDataSpecifierType,
     pub adihf_name : String,
     pub adihf_name_canon : String,
@@ -74,11 +74,11 @@ struct AdiHeaderDataSpecifier {
 // AdiRecord: represents a record in an ADI file.
 //
 
-struct AdiRecord {
+pub struct AdiRecord {
     pub adir_fields : Vec<AdiDataSpecifier>
 }
 
-struct AdiDataSpecifier {
+pub struct AdiDataSpecifier {
     pub adif_name : String,
     pub adif_name_canon : String,
     pub adif_length : u64,
@@ -126,6 +126,133 @@ fn adi_export_record(rec : &AdiRecord, output: &mut String) {
         output.push_str("\n");
     }
     output.push_str("<eor>\n");
+}
+
+
+//
+// ADI Import
+//
+// These structures and functions are used to import an ADI file.
+//
+
+use std::io;
+use std::io::BufRead;
+
+pub enum AdiParseError {
+    ADI_IO(io::Error),
+    ADI_BADINPUT(String),
+    ADI_NOT_YET_IMPLEMENTED
+}
+
+impl From<io::Error> for AdiParseError {
+    fn from(error: io::Error) -> Self {
+        AdiParseError::ADI_IO(error)
+    }
+}
+
+//pub fn adi_import(source : &mut BufRead) -> Result<AdiFile, AdiParseError> {
+//    let mut header = AdiHeader {
+//        adih_content: String::new(),
+//        adih_fields: vec![]
+//    }
+//    let buf = source.fill_buf()?;
+//    let mut start = 0;
+//    let mut i = 0;
+//    let mut c;
+//
+//    loop {
+//
+//        loop {
+//            c = buf[i] as char;
+//            if !c.is_ascii() || c.is_ascii_control() {
+//                // TODO add byte offset
+//                return Err(AdiParseError::ADI_BADINPUT(format!(
+//                    "expected ASCII character, but found byte 0x{:x}",
+//                    buf[i])));
+//            }
+//
+//            if c == '<' {
+//                break;
+//            }
+//        }
+//
+//        if i > start {
+//            header.adih_content.push_str(
+//                String::from_utf8(buf[start..i]));
+//        }
+//
+//        start = i;
+//        
+//        if c == '<' {
+//                
+//        }
+//    }
+//
+//    
+//            headertext.push_str(String::from_utf8(buf[start..i]));
+//        }
+//    }
+//
+//    Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED)
+//}
+
+enum AdiToken {
+    ADI_TOK_TEXT(String),
+    ADI_TOK_LAB,    /* '<' */
+    ADI_TOK_COLON,  /* ':' */
+    ADI_TOK_RAB,    /* '>' */
+    ADI_TOK_EOF
+}
+
+fn adi_import_read_token(source : &mut BufRead) ->
+    Result<AdiToken, AdiParseError> {
+
+    let buf = source.fill_buf()?;
+    if buf.len() == 0 {
+        return Ok(AdiToken::ADI_TOK_EOF);
+    }
+
+    let c = buf[0] as char;
+    if c == '<' {
+        source.consume(1);
+        return Ok(AdiToken::ADI_TOK_LAB);
+    }
+
+    if c == ':' {
+        source.consume(1);
+        return Ok(AdiToken::ADI_TOK_COLON);
+    }
+
+    if c == '>' {
+        source.consume(1);
+        return Ok(AdiToken::ADI_TOK_RAB);
+    }
+
+    let mut i = 0;
+    loop {
+        let c = buf[i] as char;
+        if !c.is_ascii() || c.is_ascii_control() {
+            // TODO add byte offset
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "expected ASCII character, but found byte 0x{:x}",
+                buf[i])));
+        }
+
+        if c == '<' || c == ':' || c == '>' {
+            break;
+        }
+
+        i += 1;
+        if i == buf.len() {
+            break;
+        }
+    }
+
+    //
+    // It's impossible for String::from_utf8() to fail here, since we've already
+    // validated that every character is ASCII.
+    //
+    Ok(AdiToken::ADI_TOK_TEXT(String::from_utf8(buf[0..i].to_vec()).unwrap()))
 }
 
 
