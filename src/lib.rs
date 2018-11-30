@@ -86,6 +86,14 @@ struct AdiDataSpecifier {
     pub adif_type : Option<String> // XXX should be a Type enum
 }
 
+
+//
+// ADI Export
+//
+// These functions are used to export an ADI file.  At this point, they're
+// intended for debugging rather than actual standards-compliant export.
+//
+
 // TODO this is an unpolished API for playing around.
 fn adi_export(adf : AdiFile) -> String {
     let mut output = String::new();
