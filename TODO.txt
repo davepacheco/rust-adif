@@ -2,8 +2,6 @@ Current status:
 
 - Still fleshing out the structures for the "physical" representation of the
   file ("ADI").
-  - Next steps: flesh out the test case to build and then export a more
-    complicated file.  That will help exercise the structure a bit.
   - See XXXs.
   - Build out physical types?
 - Consider building the ADI parser that takes a raw string and generates an

@@ -55,7 +55,7 @@ struct AdiHeader {
 }
 
 #[allow(non_camel_case_types)]
-enum AdiHeaderDataSpecifierType {
+pub enum AdiHeaderDataSpecifierType {
     HST_ADIF_VERSION,   /* standard adif version field */
     HST_USERDEF,        /* user-defined field */
     HST_APP             /* application-defined field */
@@ -94,7 +94,7 @@ fn adi_export(adf : AdiFile) -> String {
         None => output.push_str("no header"),
         Some(adh) => {
             output.push_str(&adh.adih_content);
-            output.push_str("<eoh>");
+            output.push_str("<eoh>\n");
         },
     }
 
@@ -106,7 +106,18 @@ fn adi_export(adf : AdiFile) -> String {
 }
 
 fn adi_export_record(rec : &AdiRecord, output: &mut String) {
-    output.push_str("record!");
+    for field in &rec.adir_fields {
+        output.push_str(format!("    <{}:{}", field.adif_name_canon.as_str(),
+            field.adif_length.to_string().as_str()).as_str());
+        if let Some(t) = &field.adif_type {
+            output.push_str(":");
+            output.push_str(t.as_str());
+        }
+        output.push_str(">");
+        output.push_str(field.adif_bytes.to_string().as_str());
+        output.push_str("\n");
+    }
+    output.push_str("<eor>\n");
 }
 
 
@@ -121,9 +132,86 @@ mod test {
         }
     }
 
+    fn make_file_header() -> super::AdiFile {
+        let headerstr = String::from("This is a test file!\n");
+        let header = super::AdiHeader {
+            adih_content: headerstr,
+            adih_fields: vec![]
+        };
+        let records = vec![];
+        return super::AdiFile {
+            adi_header: Some(header),
+            adi_records: records
+        }
+    }
+
+    fn make_file_complex() -> super::AdiFile {
+        let headerstr = String::from(
+            r#"This is a string.<adif_VERSion:3>1.0\nMore content"#);
+        let header = super::AdiHeader {
+            adih_content: headerstr,
+            adih_fields: vec![ super::AdiHeaderDataSpecifier {
+                adihf_fieldtype: super::AdiHeaderDataSpecifierType::HST_ADIF_VERSION,
+                adihf_name: String::from("adif_VERSion"),
+                adihf_name_canon: String::from("adif_version"),
+                adihf_length: 3,
+                adihf_bytes: String::from("1.0"),
+                adihf_type: None
+            } ]
+        };
+        let records = vec![
+            super::AdiRecord {
+                adir_fields: vec![
+                    super::AdiDataSpecifier {
+                        adif_name: String::from("call"),
+                        adif_name_canon: String::from("call"),
+                        adif_length: 6,
+                        adif_bytes: String::from("KK6ZBI"),
+                        adif_type: None
+                    },
+
+                    super::AdiDataSpecifier {
+                        adif_name: String::from("QSO_date"),
+                        adif_name_canon: String::from("qso_date"),
+                        adif_length: 8,
+                        adif_bytes: String::from("20181129"),
+                        adif_type: None
+                    }
+                ]
+            },
+            super::AdiRecord {
+                adir_fields: vec![
+                    super::AdiDataSpecifier {
+                        adif_name: String::from("call"),
+                        adif_name_canon: String::from("call"),
+                        adif_length: 6,
+                        adif_bytes: String::from("KB1HCN"),
+                        adif_type: Some(String::from("S"))
+                    },
+
+                    super::AdiDataSpecifier {
+                        adif_name: String::from("QSO_date"),
+                        adif_name_canon: String::from("qso_date"),
+                        adif_length: 8,
+                        adif_bytes: String::from("20181130"),
+                        adif_type: None
+                    }
+                ]
+            }
+        ];
+        return super::AdiFile {
+            adi_header: Some(header),
+            adi_records: records
+        }
+    }
+
     #[test]
     pub fn do_stuff() {
         let adf = make_file_basic();
+        println!("{}", super::adi_export(adf));
+        let adf = make_file_header();
+        println!("{}", super::adi_export(adf));
+        let adf = make_file_complex();
         println!("{}", super::adi_export(adf));
         // XXX test something
     }
