@@ -150,52 +150,6 @@ impl From<io::Error> for AdiParseError {
     }
 }
 
-//pub fn adi_import(source : &mut BufRead) -> Result<AdiFile, AdiParseError> {
-//    let mut header = AdiHeader {
-//        adih_content: String::new(),
-//        adih_fields: vec![]
-//    }
-//    let buf = source.fill_buf()?;
-//    let mut start = 0;
-//    let mut i = 0;
-//    let mut c;
-//
-//    loop {
-//
-//        loop {
-//            c = buf[i] as char;
-//            if !c.is_ascii() || c.is_ascii_control() {
-//                // TODO add byte offset
-//                return Err(AdiParseError::ADI_BADINPUT(format!(
-//                    "expected ASCII character, but found byte 0x{:x}",
-//                    buf[i])));
-//            }
-//
-//            if c == '<' {
-//                break;
-//            }
-//        }
-//
-//        if i > start {
-//            header.adih_content.push_str(
-//                String::from_utf8(buf[start..i]));
-//        }
-//
-//        start = i;
-//        
-//        if c == '<' {
-//                
-//        }
-//    }
-//
-//    
-//            headertext.push_str(String::from_utf8(buf[start..i]));
-//        }
-//    }
-//
-//    Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED)
-//}
-
 enum AdiToken {
     ADI_TOK_TEXT(String),
     ADI_TOK_LAB,    /* '<' */
@@ -207,12 +161,15 @@ enum AdiToken {
 fn adi_import_read_token(source : &mut BufRead) ->
     Result<AdiToken, AdiParseError> {
 
-    let buf = source.fill_buf()?;
-    if buf.len() == 0 {
-        return Ok(AdiToken::ADI_TOK_EOF);
-    }
+    let c = {
+        let buf = source.fill_buf()?;
+        if buf.len() == 0 {
+            return Ok(AdiToken::ADI_TOK_EOF);
+        }
 
-    let c = buf[0] as char;
+        buf[0] as char
+    };
+
     if c == '<' {
         source.consume(1);
         return Ok(AdiToken::ADI_TOK_LAB);
@@ -228,31 +185,37 @@ fn adi_import_read_token(source : &mut BufRead) ->
         return Ok(AdiToken::ADI_TOK_RAB);
     }
 
-    let mut i = 0;
-    loop {
-        let c = buf[i] as char;
-        if !c.is_ascii() || c.is_ascii_control() {
-            // TODO add byte offset
-            return Err(AdiParseError::ADI_BADINPUT(format!(
-                "expected ASCII character, but found byte 0x{:x}",
-                buf[i])));
+    let (text, length) = {
+        let buf = source.fill_buf()?;
+        let mut i = 0;
+        loop {
+            let c = buf[i] as char;
+            if !c.is_ascii() || c.is_ascii_control() {
+                // TODO add byte offset
+                return Err(AdiParseError::ADI_BADINPUT(format!(
+                    "expected ASCII character, but found byte 0x{:x}",
+                    buf[i])));
+            }
+
+            if c == '<' || c == ':' || c == '>' {
+                break;
+            }
+
+            i += 1;
+            if i == buf.len() {
+                break;
+            }
         }
 
-        if c == '<' || c == ':' || c == '>' {
-            break;
-        }
+        //
+        // It's impossible for String::from_utf8() to fail here, since we've
+        // already validated that every character is ASCII.
+        //
+        (String::from_utf8(buf[0..i].to_vec()).unwrap(), i)
+    };
 
-        i += 1;
-        if i == buf.len() {
-            break;
-        }
-    }
-
-    //
-    // It's impossible for String::from_utf8() to fail here, since we've already
-    // validated that every character is ASCII.
-    //
-    Ok(AdiToken::ADI_TOK_TEXT(String::from_utf8(buf[0..i].to_vec()).unwrap()))
+    source.consume(length);
+    Ok(AdiToken::ADI_TOK_TEXT(text))
 }
 
 
