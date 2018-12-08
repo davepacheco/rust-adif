@@ -54,6 +54,8 @@ pub struct AdiHeader {
     pub adih_fields : Vec<AdiHeaderDataSpecifier>   // header data specifiers
 }
 
+const ADI_STR_EOH : &'static str = "eoh";
+
 #[allow(non_camel_case_types)]
 pub enum AdiHeaderDataSpecifierType {
     HST_ADIF_VERSION,   /* standard adif version field */
@@ -63,11 +65,7 @@ pub enum AdiHeaderDataSpecifierType {
 
 pub struct AdiHeaderDataSpecifier {
     pub adihf_fieldtype : AdiHeaderDataSpecifierType,
-    pub adihf_name : String,
-    pub adihf_name_canon : String,
-    pub adihf_length : u64,
-    pub adihf_bytes : String, // XXX
-    pub adihf_type : Option<String> // XXX should be a Type enum
+    pub adihf_dataspec : AdiDataSpecifier
 }
 
 //
@@ -94,8 +92,7 @@ pub struct AdiDataSpecifier {
 // intended for debugging rather than actual standards-compliant export.
 //
 
-// TODO this is an unpolished API for playing around.
-fn adi_export(adf : AdiFile) -> String {
+fn adi_dump(adf : AdiFile) -> String {
     let mut output = String::new();
 
     match adf.adi_header {
@@ -107,13 +104,13 @@ fn adi_export(adf : AdiFile) -> String {
     }
 
     for rec in &adf.adi_records {
-        adi_export_record(rec, &mut output);
+        adi_dump_record(rec, &mut output);
     }
 
     output
 }
 
-fn adi_export_record(rec : &AdiRecord, output: &mut String) {
+fn adi_dump_record(rec : &AdiRecord, output: &mut String) {
     for field in &rec.adir_fields {
         output.push_str(format!("    <{}:{}", field.adif_name_canon.as_str(),
             field.adif_length.to_string().as_str()).as_str());
@@ -141,10 +138,11 @@ use std::io::BufReader;
 use std::io::Cursor;
 
 #[allow(non_camel_case_types)]
+#[derive(Debug)]
 pub enum AdiParseError {
     ADI_IO(io::Error),
     ADI_BADINPUT(String),
-    ADI_NOT_YET_IMPLEMENTED
+    ADI_NOT_YET_IMPLEMENTED(String),
 }
 
 impl From<io::Error> for AdiParseError {
@@ -153,7 +151,7 @@ impl From<io::Error> for AdiParseError {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Debug)]
 #[allow(non_camel_case_types)]
 enum AdiToken {
     ADI_TOK_TEXT(String),
@@ -173,7 +171,6 @@ pub fn adi_import_test(input : &str) {
     loop {
         if maxiters == 0 {
             panic!("bailing out after max tokens reached!");
-            return;
         }
         maxiters -= 1;
 
@@ -187,8 +184,8 @@ pub fn adi_import_test(input : &str) {
                 println!("bad input: {}", msg);
                 return;
             },
-            Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED) => {
-                println!("not yet implemented");
+            Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(msg)) => {
+                println!("not yet implemented: {}", msg);
                 return;
             },
 
@@ -213,7 +210,8 @@ pub fn adi_import_test(input : &str) {
 }
 
 fn adi_import_read_token(source : &mut BufRead) ->
-    Result<AdiToken, AdiParseError> {
+    Result<AdiToken, AdiParseError>
+{
 
     let c = {
         let buf = source.fill_buf()?;
@@ -286,6 +284,108 @@ fn adi_import_read_token(source : &mut BufRead) ->
     Ok(AdiToken::ADI_TOK_TEXT(text))
 }
 
+fn adi_parse_string(source: &str) -> Result<AdiFile, AdiParseError> {
+    let mut source_reader = Cursor::new(source);
+    adi_parse(&mut source_reader)
+}
+
+fn adi_parse(source: &mut std::io::Read) -> Result<AdiFile, AdiParseError> {
+    let mut source_buffered = BufReader::new(source);
+    let token = adi_import_read_token(&mut source_buffered)?;
+
+    let header = match token {
+        AdiToken::ADI_TOK_LAB => None,
+        _ => Some(adi_parse_header(&mut source_buffered, token)?)
+    };
+
+    Ok(AdiFile {
+        adi_header: header,
+        adi_records: vec![]
+    })
+}
+
+fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
+    Result<AdiHeader, AdiParseError>
+{
+    let mut header_content = String::new();
+    let mut header_fields : Vec<AdiHeaderDataSpecifier> = Vec::new();
+    let mut token = intoken;
+
+    assert_ne!(token, AdiToken::ADI_TOK_LAB);
+    loop {
+        match &token {
+            AdiToken::ADI_TOK_TEXT(s) => {
+                header_content.push_str(s.as_str());
+            },
+
+            //
+            // Although it seems crazy, the ADIF specification does not say
+            // anything wrong with having these special characters loose in the
+            // header (i.e., not following a "<").  We thus treat these as
+            // plain text.
+            // TODO record a warning?
+            //
+            AdiToken::ADI_TOK_COLON => {
+                header_content.push_str(":");
+            },
+            AdiToken::ADI_TOK_RAB => {
+                header_content.push_str(">");
+            },
+
+            AdiToken::ADI_TOK_LAB => {
+                let next = adi_import_read_token(source)?;
+                if let AdiToken::ADI_TOK_TEXT(s) = &next {
+                    if s.to_lowercase() == ADI_STR_EOH {
+                        let next2 = adi_import_read_token(source)?;
+                        if next2 == AdiToken::ADI_TOK_RAB {
+                            // We're done with the header.
+                            break;
+                        } else {
+                            // XXX Anything other than a right-angle
+                            // bracket should in principle cause us to
+                            // parse this as a regular data specifier
+                            // (in principle, anyway -- it would be
+                            // somewhat surprising if other parsers
+                            // allowed header fields called "eoh").  However,
+                            // implementing that requires pushing this
+                            // token back onto the stream, which we don't
+                            // yet support.
+                            return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(
+                                "header text containing '<eoh'".to_string()));
+                        }
+                    }
+                }
+
+                //
+                // If we make it here, it's because we got something other than
+                // "<eoh>".  Parse this as a data specifier.
+                //
+                let spec = adi_parse_header_data_specifier(source, next)?;
+                header_fields.push(spec);
+            },
+
+            AdiToken::ADI_TOK_EOF => {
+                return Err(AdiParseError::ADI_BADINPUT(
+                    "unexpected end of input while reading header".to_string()));
+            }
+        }
+
+        token = adi_import_read_token(source)?;
+    }
+
+    Ok(AdiHeader {
+        adih_content: header_content,
+        adih_fields: header_fields
+    })
+}
+
+fn adi_parse_header_data_specifier(source: &mut BufRead, token: AdiToken) ->
+    Result<AdiHeaderDataSpecifier, AdiParseError>
+{
+    Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(
+        "header data specifier".to_string()))
+}
+
 
 #[cfg(test)]
 mod test {
@@ -318,11 +418,13 @@ mod test {
             adih_content: headerstr,
             adih_fields: vec![ super::AdiHeaderDataSpecifier {
                 adihf_fieldtype: super::AdiHeaderDataSpecifierType::HST_ADIF_VERSION,
-                adihf_name: String::from("adif_VERSion"),
-                adihf_name_canon: String::from("adif_version"),
-                adihf_length: 3,
-                adihf_bytes: String::from("1.0"),
-                adihf_type: None
+                adihf_dataspec: super::AdiDataSpecifier {
+                    adif_name: String::from("adif_VERSion"),
+                    adif_name_canon: String::from("adif_version"),
+                    adif_length: 3,
+                    adif_bytes: String::from("1.0"),
+                    adif_type: None
+                }
             } ]
         };
         let records = vec![
@@ -374,17 +476,43 @@ mod test {
     #[test]
     pub fn do_stuff() {
         let adf = make_file_basic();
-        println!("{}", super::adi_export(adf));
+        println!("{}", super::adi_dump(adf));
         let adf = make_file_header();
-        println!("{}", super::adi_export(adf));
+        println!("{}", super::adi_dump(adf));
         let adf = make_file_complex();
-        println!("{}", super::adi_export(adf));
+        println!("{}", super::adi_dump(adf));
         super::adi_import_test(r#"
             header stuff here<eoh>
             <call:6>KK6ZBI
             <bupkis:3>123
             <eor>
         "#);
+
+        println!("\n\nparse tests\n");
+        parse_test_string(r"foobar");
+        parse_test_string(r"<foobar>");
+        parse_test_string(r"<eoh>"); // should be disallowed later
+        parse_test_string(r"foobar<eoh>");
+        parse_test_string(r"foobar<eoh:3>");
+        parse_test_string(r"foobar<eoh:3>");
+        parse_test_string(r"foobar<foo:3>123<eoh>");
+
         // XXX test something
+    }
+
+    fn parse_test_string(s : &str) {
+        println!("test input:\n{}\n", s);
+        test_print(super::adi_parse_string(s));
+    }
+
+    fn test_print(r : Result<super::AdiFile, super::AdiParseError>) {
+        match r {
+            Err(e) => {
+                println!("error:\n{:?}", e);
+            },
+            Ok(adf) => {
+                println!("success:\n{}", super::adi_dump(adf));
+            }
+        }
     }
 }

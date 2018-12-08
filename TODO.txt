@@ -1,7 +1,9 @@
 Current status:
 
-- Build the ADI parser that takes a raw string and generates an AdiFile?
-  - Build a new function that uses adi_import_read_token() to parse the file
+- Working on ADI parser that takes a raw string and generates an AdiFile
+  - Next stop: adi_parse_header_data_specifier()
+    which will involve writing adi_parse_data_specifier()
+    which looks like the hard part of this whole thing.
 - Back to the structures for the "physical" representation of the file ("ADI").
   - See XXXs and TODOs
   - Build out physical types?
@@ -13,3 +15,13 @@ Current status:
 - Build a driver program (or a few?) with a few basic functions:
   - import file and report on it?
   - import file and export the parsed version again?
+
+General issues:
+- Pending refactor:
+  - want to construct a ParseContext that has a current list of tokens so that I
+    can un-consume tokens.  This might make sense as an iterator?  I'm not sure
+    yet.
+- I think it's a general bug that if there are two STRING tokens together, they
+  don't get concatenated as they should.  Maybe this can be addressed with the
+  above refactor?
+
