@@ -51,24 +51,15 @@ pub struct AdiFile {
 
 pub struct AdiHeader {
     pub adih_content : String,                      // complete header content
-    pub adih_fields : Vec<AdiHeaderDataSpecifier>   // header data specifiers
+    pub adih_fields : Vec<AdiDataSpecifier>         // header data specifiers
 }
 
 const ADI_STR_EOH : &'static str = "eoh";
-
-#[derive(Debug)]
-#[allow(non_camel_case_types)]
-pub enum AdiHeaderDataSpecifierType {
-    HST_ADIF_VERSION,   /* standard adif version field */
-    HST_USERDEF,        /* user-defined field */
-    HST_APP             /* application-defined field */
-}
-
-#[derive(Debug)]
-pub struct AdiHeaderDataSpecifier {
-    pub adihf_fieldtype : AdiHeaderDataSpecifierType,
-    pub adihf_dataspec : AdiDataSpecifier
-}
+const ADIF_HEADER_ADIF_VER : &'static str = "adif_ver";
+const ADIF_HEADER_CREATED_TIMESTAMP : &'static str = "created_timestamp";
+const ADIF_HEADER_PROGRAMID : &'static str = "programid";
+const ADIF_HEADER_PROGRAMVERSION : &'static str = "programversion";
+const ADIF_HEADER_USERDEF : &'static str = "userdef";
 
 //
 // AdiRecord: represents a record in an ADI file.
@@ -325,7 +316,7 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
     Result<AdiHeader, AdiParseError>
 {
     let mut header_content = String::new();
-    let mut header_fields : Vec<AdiHeaderDataSpecifier> = Vec::new();
+    let mut header_fields : Vec<AdiDataSpecifier> = Vec::new();
     let mut token = intoken;
 
     assert_ne!(token, AdiToken::ADI_TOK_LAB);
@@ -377,7 +368,7 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
                 // If we make it here, it's because we got something other than
                 // "<eoh>".  Parse this as a data specifier.
                 //
-                let spec = adi_parse_header_data_specifier(source, next)?;
+                let spec = adi_parse_data_specifier(source, next)?;
                 header_fields.push(spec);
             },
 
@@ -393,16 +384,6 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
     Ok(AdiHeader {
         adih_content: header_content,
         adih_fields: header_fields
-    })
-}
-
-fn adi_parse_header_data_specifier(source: &mut BufRead, token: AdiToken) ->
-    Result<AdiHeaderDataSpecifier, AdiParseError>
-{
-    Ok(AdiHeaderDataSpecifier {
-        // XXX
-        adihf_fieldtype: AdiHeaderDataSpecifierType::HST_USERDEF,
-        adihf_dataspec: adi_parse_data_specifier(source, token)?
     })
 }
 
@@ -549,15 +530,12 @@ mod test {
             r#"This is a string.<adif_VERSion:3>1.0\nMore content"#);
         let header = super::AdiHeader {
             adih_content: headerstr,
-            adih_fields: vec![ super::AdiHeaderDataSpecifier {
-                adihf_fieldtype: super::AdiHeaderDataSpecifierType::HST_ADIF_VERSION,
-                adihf_dataspec: super::AdiDataSpecifier {
-                    adif_name: String::from("adif_VERSion"),
-                    adif_name_canon: String::from("adif_version"),
-                    adif_length: 3,
-                    adif_bytes: String::from("1.0"),
-                    adif_type: None
-                }
+            adih_fields: vec![ super::AdiDataSpecifier {
+                adif_name: String::from("adif_VERSion"),
+                adif_name_canon: String::from("adif_version"),
+                adif_length: 3,
+                adif_bytes: String::from("1.0"),
+                adif_type: None
             } ]
         };
         let records = vec![
