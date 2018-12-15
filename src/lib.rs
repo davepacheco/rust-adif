@@ -161,7 +161,7 @@ enum AdiToken {
 fn adi_token_text(token: AdiToken) -> String
 {
     String::from(match token {
-        AdiToken::ADI_TOK_TEXT(s) => "string",
+        AdiToken::ADI_TOK_TEXT(_) => "string",
         AdiToken::ADI_TOK_LAB => "<",
         AdiToken::ADI_TOK_RAB => ">",
         AdiToken::ADI_TOK_COLON => ":",
@@ -170,7 +170,7 @@ fn adi_token_text(token: AdiToken) -> String
 }
 
 pub fn adi_import_test(input : &str) {
-    println!("\n\ntokenzing string:\n{}\n\n", input);
+    println!("\n\ntokenizing string:\n{}\n\n", input);
 
     let source = Cursor::new(input);
     let mut buffered = BufReader::new(source);
@@ -297,17 +297,90 @@ fn adi_parse_string(source: &str) -> Result<AdiFile, AdiParseError> {
     adi_parse(&mut source_reader)
 }
 
-fn adi_parse(source: &mut std::io::Read) -> Result<AdiFile, AdiParseError> {
-    let mut source_buffered = BufReader::new(source);
-    let token = adi_import_read_token(&mut source_buffered)?;
+// TODO needs work
+struct AdiParseState<'a> {
+    aps_source : Box<BufRead + 'a>,
+    aps_tokens : Vec<AdiToken>,
+    aps_error : Option<AdiParseError>,
+    aps_done : bool
+}
 
-    let header = match token {
-        AdiToken::ADI_TOK_LAB => None,
-        _ => Some(adi_parse_header(&mut source_buffered, token)?)
+fn adi_parse_advance_tokens(aps : &mut AdiParseState, howmany : u8)
+{
+    while aps.aps_error.is_none() && !aps.aps_done &&
+        (howmany as usize) > aps.aps_tokens.len() {
+        let result = adi_import_read_token(&mut aps.aps_source);
+        match result {
+            Ok(t) => {
+                if t == AdiToken::ADI_TOK_EOF {
+                    aps.aps_done = true;
+                }
+                aps.aps_tokens.push(t);
+            }
+            Err(e) => {
+                aps.aps_error = Some(e);
+            }
+        }
+    }
+}
+
+fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
+{
+    //
+    // It's illegal to try to consume tokens that haven't been read yet.
+    // In order to read them, we must have loaded them into "aps_tokens".
+    //
+    assert!(howmany as usize <= aps.aps_tokens.len());
+
+    // TODO there's probably a more efficient way to do this.
+    let mut count = 0;
+    while count < howmany {
+        aps.aps_tokens.remove(0);
+        count += 1;
+    }
+}
+
+fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
+    Option<&'a AdiToken>
+{
+    adi_parse_advance_tokens(aps, which + 1);
+
+    if let Some(_) = aps.aps_error {
+        return None;
+    }
+
+    let which = which as usize;
+    if which < aps.aps_tokens.len() {
+        return Some(&aps.aps_tokens[which]);
+    }
+
+    //
+    // At this point, we must be at end-of-file, and the last token ought to be
+    // the end-of-file token.
+    //
+    assert!(aps.aps_done);
+    assert!(aps.aps_tokens.len() > 0);
+    assert_eq!(aps.aps_tokens[aps.aps_tokens.len() - 1], AdiToken::ADI_TOK_EOF);
+    return Some(&aps.aps_tokens[aps.aps_tokens.len() - 1]);
+}
+
+fn adi_parse(source: &mut std::io::Read) -> Result<AdiFile, AdiParseError> {
+    let mut aps = AdiParseState {
+        aps_source: Box::new(BufReader::new(source)),
+        aps_tokens: Vec::new(),
+        aps_error: None,
+        aps_done: false
     };
 
+    let token = adi_parse_peek_token(&mut aps, 0);
+
+    // let header = match token {
+    //     AdiToken::ADI_TOK_LAB => None,
+    //     _ => Some(adi_parse_header(&mut source_buffered, token)?)
+    // };
+
     Ok(AdiFile {
-        adi_header: header,
+        adi_header: None, // XXX
         adi_records: vec![]
     })
 }
