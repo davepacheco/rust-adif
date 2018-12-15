@@ -1,9 +1,10 @@
 Current status:
 
 - Working on ADI parser that takes a raw string and generates an AdiFile
-  - Next stop: adi_parse_header_data_specifier()
-    which will involve writing adi_parse_data_specifier()
-    which looks like the hard part of this whole thing.
+  - Currently: fleshing out adi_parse_data_specifier().  It works for the simple
+    cases.  May want to keep fleshing out the rest of the program before fixing
+    the more complex cases.
+    Then revisit adi_parse_header_data_specifier().
 - Back to the structures for the "physical" representation of the file ("ADI").
   - See XXXs and TODOs
   - Build out physical types?

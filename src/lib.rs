@@ -56,6 +56,7 @@ pub struct AdiHeader {
 
 const ADI_STR_EOH : &'static str = "eoh";
 
+#[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum AdiHeaderDataSpecifierType {
     HST_ADIF_VERSION,   /* standard adif version field */
@@ -63,6 +64,7 @@ pub enum AdiHeaderDataSpecifierType {
     HST_APP             /* application-defined field */
 }
 
+#[derive(Debug)]
 pub struct AdiHeaderDataSpecifier {
     pub adihf_fieldtype : AdiHeaderDataSpecifierType,
     pub adihf_dataspec : AdiDataSpecifier
@@ -76,10 +78,11 @@ pub struct AdiRecord {
     pub adir_fields : Vec<AdiDataSpecifier>
 }
 
+#[derive(Debug)]
 pub struct AdiDataSpecifier {
     pub adif_name : String,
     pub adif_name_canon : String,
-    pub adif_length : u64,
+    pub adif_length : usize,
     pub adif_bytes : String,    // XXX
     pub adif_type : Option<String> // XXX should be a Type enum
 }
@@ -99,6 +102,9 @@ fn adi_dump(adf : AdiFile) -> String {
         None => output.push_str("no header"),
         Some(adh) => {
             output.push_str(&adh.adih_content);
+            for field in &adh.adih_fields {
+                output.push_str(&format!("{:?}\n", field));
+            }
             output.push_str("<eoh>\n");
         },
     }
@@ -159,6 +165,17 @@ enum AdiToken {
     ADI_TOK_COLON,  /* ':' */
     ADI_TOK_RAB,    /* '>' */
     ADI_TOK_EOF
+}
+
+fn adi_token_text(token: AdiToken) -> String
+{
+    String::from(match token {
+        AdiToken::ADI_TOK_TEXT(s) => "string",
+        AdiToken::ADI_TOK_LAB => "<",
+        AdiToken::ADI_TOK_RAB => ">",
+        AdiToken::ADI_TOK_COLON => ":",
+        AdiToken::ADI_TOK_EOF => "end of input"
+    })
 }
 
 pub fn adi_import_test(input : &str) {
@@ -382,10 +399,126 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
 fn adi_parse_header_data_specifier(source: &mut BufRead, token: AdiToken) ->
     Result<AdiHeaderDataSpecifier, AdiParseError>
 {
-    Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(
-        "header data specifier".to_string()))
+    Ok(AdiHeaderDataSpecifier {
+        // XXX
+        adihf_fieldtype: AdiHeaderDataSpecifierType::HST_USERDEF,
+        adihf_dataspec: adi_parse_data_specifier(source, token)?
+    })
 }
 
+// "token" is the first token *after* the '<' that began this data specifier.
+fn adi_parse_data_specifier(source: &mut BufRead, token: AdiToken) ->
+    Result<AdiDataSpecifier, AdiParseError>
+{
+    let fieldname = match token {
+        AdiToken::ADI_TOK_TEXT(s) => s,
+        _ => {
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier: expected string for field name, but found \"{}\"",
+                adi_token_text(token))));
+        }
+    };
+
+    let colon = adi_import_read_token(source)?;
+    // TODO There must be a more elegant way to do this.
+    match colon {
+        AdiToken::ADI_TOK_COLON => (),
+        _ => {
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier: expected \":\", but found \"{}\"",
+                adi_token_text(colon))));
+        }
+    };
+
+    let token_fieldlength = adi_import_read_token(source)?;
+    let fieldlength_str = match token_fieldlength {
+        AdiToken::ADI_TOK_TEXT(s) => s,
+        _ => {
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier length: expected field length, but found \"{}\"",
+                adi_token_text(token_fieldlength))));
+        }
+    };
+
+    // XXX Check appropriate integer size
+    // XXX is there a cleaner way to fix up this error?
+    let fieldlength_result = fieldlength_str.parse::<usize>();
+    let fieldlength = match fieldlength_result {
+        Ok(n) => n,
+        Err(s) => {
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier length: {}", s)));
+        }
+    };
+
+    // XXX impose max length on "fieldlength"?
+    let token_rab = adi_import_read_token(source)?;
+    match token_rab {
+        AdiToken::ADI_TOK_RAB => (),
+        AdiToken::ADI_TOK_COLON => {
+            // TODO
+            return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(String::from(
+                "parsing data specifier: typed values are not supported")));
+        },
+        _ => {
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier: expected \">\", but found \"{}\"",
+                adi_token_text(token_rab))));
+        }
+    };
+
+    if fieldlength == 0 {
+        return Ok(AdiDataSpecifier {
+            adif_name_canon: fieldname.to_lowercase(),
+            adif_name: fieldname,
+            adif_length: 0,
+            adif_bytes: String::new(),
+            adif_type: None
+        })
+    }
+
+    //
+    // XXX This part needs a fair bit of work.  First, there may be multiple
+    // string tokens together that should be concatenated (e.g., just because
+    // a long string was split across multiple instances of the underlying
+    // buffer).  Second, this string can contain "<", ">", and ":", and those
+    // should just get inserted into the token value, not treated specially.
+    // Third, we should be receiving this here as an array of bytes, not a
+    // string.  Finally, we should read only the first "fieldlength" bytes and
+    // discard the rest.
+    //
+    // To get something useful to start with, we ignore most of these problems,
+    // assume that the next text token contains the whole value, but read only
+    // the first "fieldlength" bytes of it.
+    //
+    let token_value = adi_import_read_token(source)?;
+    let value = match token_value {
+        AdiToken::ADI_TOK_TEXT(s) => s,
+        AdiToken::ADI_TOK_EOF => {
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier: unexpected {}",
+                adi_token_text(token_value))));
+        }
+        _ => {
+            return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(format!(
+                "parsing data specifier: unsupported token \"{}\" at start of value",
+                adi_token_text(token_value))));
+        }
+    };
+
+    if value.len() < fieldlength {
+        return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(format!(
+            "parsing data specifier: multi-token values not yet supported")));
+    }
+
+    Ok(AdiDataSpecifier {
+        adif_name_canon: fieldname.to_lowercase(),
+        adif_name: fieldname,
+        adif_length: fieldlength,
+        adif_bytes: value[0..fieldlength].to_string(),
+        adif_type: None
+    })
+}
 
 #[cfg(test)]
 mod test {
