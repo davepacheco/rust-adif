@@ -60,6 +60,7 @@ const ADIF_HEADER_CREATED_TIMESTAMP : &'static str = "created_timestamp";
 const ADIF_HEADER_PROGRAMID : &'static str = "programid";
 const ADIF_HEADER_PROGRAMVERSION : &'static str = "programversion";
 const ADIF_HEADER_USERDEF : &'static str = "userdef";
+const ADI_MAX_FIELDLEN : usize = 1024;
 
 //
 // AdiRecord: represents a record in an ADI file.
@@ -148,7 +149,11 @@ impl From<io::Error> for AdiParseError {
     }
 }
 
-#[derive(PartialEq, Debug)]
+//
+// Note: this type derives Clone because it's convenient for
+// adi_parse_peek_token() to return a copy of its token.  However, that's pretty
+// inefficient for string tokens.  It'd be nice to resolve this somehow.
+#[derive(PartialEq, Debug, Clone)]
 #[allow(non_camel_case_types)]
 enum AdiToken {
     ADI_TOK_TEXT(String),
@@ -158,13 +163,13 @@ enum AdiToken {
     ADI_TOK_EOF
 }
 
-fn adi_token_text(token: AdiToken) -> String
+fn adi_token_text(token: &AdiToken) -> String
 {
-    String::from(match token {
+    String::from(match *token {
         AdiToken::ADI_TOK_TEXT(_) => "string",
-        AdiToken::ADI_TOK_LAB => "<",
-        AdiToken::ADI_TOK_RAB => ">",
-        AdiToken::ADI_TOK_COLON => ":",
+        AdiToken::ADI_TOK_LAB => "\"<\"",
+        AdiToken::ADI_TOK_RAB => "\">\"",
+        AdiToken::ADI_TOK_COLON => "\":\"",
         AdiToken::ADI_TOK_EOF => "end of input"
     })
 }
@@ -301,14 +306,15 @@ fn adi_parse_string(source: &str) -> Result<AdiFile, AdiParseError> {
 struct AdiParseState<'a> {
     aps_source : Box<BufRead + 'a>,
     aps_tokens : Vec<AdiToken>,
-    aps_error : Option<AdiParseError>,
+    aps_error : bool,
     aps_done : bool
 }
 
-fn adi_parse_advance_tokens(aps : &mut AdiParseState, howmany : u8)
+fn adi_parse_advance_tokens(aps : &mut AdiParseState, howmany : u8) ->
+    Result<(), AdiParseError>
 {
-    while aps.aps_error.is_none() && !aps.aps_done &&
-        (howmany as usize) > aps.aps_tokens.len() {
+    assert!(!aps.aps_error);
+    while !aps.aps_done && (howmany as usize) > aps.aps_tokens.len() {
         let result = adi_import_read_token(&mut aps.aps_source);
         match result {
             Ok(t) => {
@@ -318,10 +324,13 @@ fn adi_parse_advance_tokens(aps : &mut AdiParseState, howmany : u8)
                 aps.aps_tokens.push(t);
             }
             Err(e) => {
-                aps.aps_error = Some(e);
+                aps.aps_error = true;
+                return Err(e)
             }
         }
     }
+
+    Ok(())
 }
 
 fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
@@ -330,6 +339,7 @@ fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
     // It's illegal to try to consume tokens that haven't been read yet.
     // In order to read them, we must have loaded them into "aps_tokens".
     //
+    assert!(!aps.aps_error);
     assert!(howmany as usize <= aps.aps_tokens.len());
 
     // TODO there's probably a more efficient way to do this.
@@ -341,17 +351,13 @@ fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
 }
 
 fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
-    Option<&'a AdiToken>
+    Result<AdiToken, AdiParseError>
 {
-    adi_parse_advance_tokens(aps, which + 1);
-
-    if let Some(_) = aps.aps_error {
-        return None;
-    }
+    adi_parse_advance_tokens(aps, which + 1)?;
 
     let which = which as usize;
     if which < aps.aps_tokens.len() {
-        return Some(&aps.aps_tokens[which]);
+        return Ok(aps.aps_tokens[which].clone());
     }
 
     //
@@ -361,42 +367,41 @@ fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
     assert!(aps.aps_done);
     assert!(aps.aps_tokens.len() > 0);
     assert_eq!(aps.aps_tokens[aps.aps_tokens.len() - 1], AdiToken::ADI_TOK_EOF);
-    return Some(&aps.aps_tokens[aps.aps_tokens.len() - 1]);
+    return Ok(aps.aps_tokens[aps.aps_tokens.len() - 1].clone());
 }
 
-fn adi_parse(source: &mut std::io::Read) -> Result<AdiFile, AdiParseError> {
+fn adi_parse(source: &mut std::io::Read) -> Result<AdiFile, AdiParseError>
+{
     let mut aps = AdiParseState {
         aps_source: Box::new(BufReader::new(source)),
         aps_tokens: Vec::new(),
-        aps_error: None,
+        aps_error: false,
         aps_done: false
     };
 
-    let token = adi_parse_peek_token(&mut aps, 0);
-
-    // let header = match token {
-    //     AdiToken::ADI_TOK_LAB => None,
-    //     _ => Some(adi_parse_header(&mut source_buffered, token)?)
-    // };
+    let header = match adi_parse_peek_token(&mut aps, 0)? {
+        AdiToken::ADI_TOK_LAB => None,
+        _ => {
+            Some(adi_parse_header(&mut aps)?)
+        }
+    };
 
     Ok(AdiFile {
-        adi_header: None, // XXX
-        adi_records: vec![]
+        adi_header: header,
+        adi_records: vec![] // XXX
     })
 }
 
-fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
-    Result<AdiHeader, AdiParseError>
+fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 {
     let mut header_content = String::new();
     let mut header_fields : Vec<AdiDataSpecifier> = Vec::new();
-    let mut token = intoken;
 
-    assert_ne!(token, AdiToken::ADI_TOK_LAB);
     loop {
-        match &token {
+        match adi_parse_peek_token(aps, 0)? {
             AdiToken::ADI_TOK_TEXT(s) => {
                 header_content.push_str(s.as_str());
+                adi_parse_consume_tokens(aps, 1);
             },
 
             //
@@ -408,40 +413,37 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
             //
             AdiToken::ADI_TOK_COLON => {
                 header_content.push_str(":");
+                adi_parse_consume_tokens(aps, 1);
             },
             AdiToken::ADI_TOK_RAB => {
                 header_content.push_str(">");
+                adi_parse_consume_tokens(aps, 1);
             },
 
             AdiToken::ADI_TOK_LAB => {
-                let next = adi_import_read_token(source)?;
+                let next = adi_parse_peek_token(aps, 1)?;
                 if let AdiToken::ADI_TOK_TEXT(s) = &next {
                     if s.to_lowercase() == ADI_STR_EOH {
-                        let next2 = adi_import_read_token(source)?;
+                        let next2 = adi_parse_peek_token(aps, 2)?;
                         if next2 == AdiToken::ADI_TOK_RAB {
-                            // We're done with the header.
+                            //
+                            // We're done with the header.  Consume the '<',
+                            // "eoh", and ">" tokens and move on.
+                            //
+                            adi_parse_consume_tokens(aps, 3);
                             break;
-                        } else {
-                            // XXX Anything other than a right-angle
-                            // bracket should in principle cause us to
-                            // parse this as a regular data specifier
-                            // (in principle, anyway -- it would be
-                            // somewhat surprising if other parsers
-                            // allowed header fields called "eoh").  However,
-                            // implementing that requires pushing this
-                            // token back onto the stream, which we don't
-                            // yet support.
-                            return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(
-                                "header text containing '<eoh'".to_string()));
                         }
                     }
                 }
 
                 //
                 // If we make it here, it's because we got something other than
-                // "<eoh>".  Parse this as a data specifier.
+                // "<eoh>".  Parse this as a data specifier.  Note that this
+                // means we'd support a normal data specifier for a field called
+                // "eoh", which is pretty dubious, but appears to be technically
+                // allowed.
                 //
-                let spec = adi_parse_data_specifier(source, next)?;
+                let spec = adi_parse_data_specifier(aps)?;
                 header_fields.push(spec);
             },
 
@@ -450,8 +452,6 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
                     "unexpected end of input while reading header".to_string()));
             }
         }
-
-        token = adi_import_read_token(source)?;
     }
 
     Ok(AdiHeader {
@@ -460,54 +460,86 @@ fn adi_parse_header(source: &mut BufRead, intoken: AdiToken) ->
     })
 }
 
-// "token" is the first token *after* the '<' that began this data specifier.
-fn adi_parse_data_specifier(source: &mut BufRead, token: AdiToken) ->
+//
+// There are two valid token sequences here.  Below is the simple case:
+//
+//   <FIELDNAME:FIELDLEN>FIELDVALUE_...<
+//   ^^        ^^       ^^         ^   ^
+//   ||        ||       ||         |   | # TOKEN
+//   ++--------++-------++---------+---+ 0 (LAB)
+//    +--------++-------++---------+---+ 1 (STRING) FIELDNAME
+//             ++-------++---------+---+ 2 (COLON)
+//              +-------++---------+---+ 3 (STRING) FIELDLEN
+//                      ++---------+---+ 4 (RAB)
+//                       +---------+---+ 5 (STRING) FIELDVALUE
+//                                 +---+ 6 (STRING) (discarded)
+//                                     + 7 (LAB)
+//
+// ADI also allows an additional colon (COLON) and type specifier (STRING)
+// directly after the field length.  We do not yet support this, so we only
+// handle the sequence above.
+//
+// The caller is responsible for ensuring that the first token is a left angle
+// bracket before invoking this function.
+//
+fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
     Result<AdiDataSpecifier, AdiParseError>
 {
-    let fieldname = match token {
+    assert_eq!(adi_parse_peek_token(aps, 0).unwrap(), AdiToken::ADI_TOK_LAB);
+
+    let t_fieldname   = adi_parse_peek_token(aps, 1)?;
+    let t_colon       = adi_parse_peek_token(aps, 2)?;
+    let t_fieldlength = adi_parse_peek_token(aps, 3)?;
+    let t_rab         = adi_parse_peek_token(aps, 4)?;
+
+    let fieldname = match t_fieldname {
         AdiToken::ADI_TOK_TEXT(s) => s,
         _ => {
             return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier: expected string for field name, but found \"{}\"",
-                adi_token_text(token))));
+                "parsing data specifier: expected string for field name, but \
+                found {}", adi_token_text(&t_fieldname))));
         }
     };
 
-    let colon = adi_import_read_token(source)?;
-    // TODO There must be a more elegant way to do this.
-    match colon {
+    match t_colon {
         AdiToken::ADI_TOK_COLON => (),
         _ => {
             return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier: expected \":\", but found \"{}\"",
-                adi_token_text(colon))));
+                "parsing data specifier: expected {}, but found {}",
+                adi_token_text(&AdiToken::ADI_TOK_COLON),
+                adi_token_text(&t_colon))));
         }
     };
 
-    let token_fieldlength = adi_import_read_token(source)?;
-    let fieldlength_str = match token_fieldlength {
+    let fieldlength_str = match t_fieldlength {
         AdiToken::ADI_TOK_TEXT(s) => s,
         _ => {
             return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier length: expected field length, but found \"{}\"",
-                adi_token_text(token_fieldlength))));
+                "parsing data specifier length: expected field length, \
+                but found {}", adi_token_text(&t_fieldlength))));
         }
     };
 
-    // XXX Check appropriate integer size
-    // XXX is there a cleaner way to fix up this error?
     let fieldlength_result = fieldlength_str.parse::<usize>();
     let fieldlength = match fieldlength_result {
-        Ok(n) => n,
+        Ok(n) if n <= ADI_MAX_FIELDLEN => n,
+        Ok(_) => {
+            //
+            // This limit is not intrinsic to our approach, but it's intended to
+            // ensure that we fail gracefully if given something that would
+            // otherwise attempt to use lots of memory.
+            //
+            return Err(AdiParseError::ADI_BADINPUT(format!(
+                "parsing data specifier: max supported size is {} bytes",
+                ADI_MAX_FIELDLEN)));
+        }
         Err(s) => {
             return Err(AdiParseError::ADI_BADINPUT(format!(
                 "parsing data specifier length: {}", s)));
         }
     };
 
-    // XXX impose max length on "fieldlength"?
-    let token_rab = adi_import_read_token(source)?;
-    match token_rab {
+    match t_rab {
         AdiToken::ADI_TOK_RAB => (),
         AdiToken::ADI_TOK_COLON => {
             // TODO
@@ -516,60 +548,50 @@ fn adi_parse_data_specifier(source: &mut BufRead, token: AdiToken) ->
         },
         _ => {
             return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier: expected \">\", but found \"{}\"",
-                adi_token_text(token_rab))));
+                "parsing data specifier: expected {}, but found {}",
+                adi_token_text(&AdiToken::ADI_TOK_RAB),
+                adi_token_text(&t_rab))));
         }
     };
 
-    if fieldlength == 0 {
-        return Ok(AdiDataSpecifier {
-            adif_name_canon: fieldname.to_lowercase(),
-            adif_name: fieldname,
-            adif_length: 0,
-            adif_bytes: String::new(),
-            adif_type: None
-        })
+    adi_parse_consume_tokens(aps, 5);
+    let mut fieldvalue = String::new();
+    while fieldlength > fieldvalue.len() {
+        let t_value = adi_parse_peek_token(aps, 0)?;
+        adi_parse_consume_tokens(aps, 1);
+        match t_value {
+            AdiToken::ADI_TOK_COLON => {
+                fieldvalue.push_str("<");
+            }
+            AdiToken::ADI_TOK_RAB => {
+                fieldvalue.push_str(">");
+            }
+            AdiToken::ADI_TOK_LAB => {
+                fieldvalue.push_str("<");
+            }
+            AdiToken::ADI_TOK_TEXT(s) => {
+                fieldvalue.push_str(&s);
+            }
+            AdiToken::ADI_TOK_EOF => {
+                return Err(AdiParseError::ADI_BADINPUT(format!(
+                    "parsing data specifier: unexpected {} in value",
+                    adi_token_text(&AdiToken::ADI_TOK_EOF))));
+            }
+        }
     }
 
     //
-    // XXX This part needs a fair bit of work.  First, there may be multiple
-    // string tokens together that should be concatenated (e.g., just because
-    // a long string was split across multiple instances of the underlying
-    // buffer).  Second, this string can contain "<", ">", and ":", and those
-    // should just get inserted into the token value, not treated specially.
-    // Third, we should be receiving this here as an array of bytes, not a
-    // string.  Finally, we should read only the first "fieldlength" bytes and
-    // discard the rest.
+    // At this point, we've read enough bytes to account for the value.  Discard
+    // anything extra that we've accumulated.
+    // TODO this only works for ASCII.
     //
-    // To get something useful to start with, we ignore most of these problems,
-    // assume that the next text token contains the whole value, but read only
-    // the first "fieldlength" bytes of it.
-    //
-    let token_value = adi_import_read_token(source)?;
-    let value = match token_value {
-        AdiToken::ADI_TOK_TEXT(s) => s,
-        AdiToken::ADI_TOK_EOF => {
-            return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier: unexpected {}",
-                adi_token_text(token_value))));
-        }
-        _ => {
-            return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(format!(
-                "parsing data specifier: unsupported token \"{}\" at start of value",
-                adi_token_text(token_value))));
-        }
-    };
-
-    if value.len() < fieldlength {
-        return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(format!(
-            "parsing data specifier: multi-token values not yet supported")));
-    }
+    fieldvalue.truncate(fieldlength);
 
     Ok(AdiDataSpecifier {
         adif_name_canon: fieldname.to_lowercase(),
-        adif_name: fieldname,
+        adif_name: fieldname.to_string(), // TODO extra copy?
         adif_length: fieldlength,
-        adif_bytes: value[0..fieldlength].to_string(),
+        adif_bytes: fieldvalue,
         adif_type: None
     })
 }
@@ -677,9 +699,9 @@ mod test {
         parse_test_string(r"<foobar>");
         parse_test_string(r"<eoh>"); // should be disallowed later
         parse_test_string(r"foobar<eoh>");
-        parse_test_string(r"foobar<eoh:3>");
-        parse_test_string(r"foobar<eoh:3>");
+        parse_test_string(r"foobar<eoh:3>789");
         parse_test_string(r"foobar<foo:3>123<eoh>");
+        parse_test_string(r"preamble<foo:3>12345<bar:7>123456789<eoh>");
 
         // XXX test something
     }

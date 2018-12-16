@@ -1,12 +1,9 @@
 Current status:
 
 - Working on ADI parser that takes a raw string and generates an AdiFile
-  - Currently: refactoring parsing routines to store data in AdiParseState so
+  - Just finished refactoring parsing routines to store data in AdiParseState so
     that it's easier to look ahead 1-2 tokens, as we need to do to detect <eor>.
-    Need to revisit adi_parse() and all the parse functions I have so far.
-  - Also: fleshing out adi_parse_data_specifier().  It works for the simple
-    cases.  May want to keep fleshing out the rest of the program before fixing
-    the more complex cases.
+  - Next: parsing actual records?
 - Back to the structures for the "physical" representation of the file ("ADI").
   - See XXXs and TODOs
   - Build out physical types?
