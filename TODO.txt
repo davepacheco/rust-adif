@@ -1,9 +1,7 @@
 Current status:
 
 - Working on ADI parser that takes a raw string and generates an AdiFile
-  - Just finished refactoring parsing routines to store data in AdiParseState so
-    that it's easier to look ahead 1-2 tokens, as we need to do to detect <eor>.
-  - Next: parsing actual records?
+  - Just finished parsing records
 - Back to the structures for the "physical" representation of the file ("ADI").
   - See XXXs and TODOs
   - Build out physical types?

@@ -386,9 +386,11 @@ fn adi_parse(source: &mut std::io::Read) -> Result<AdiFile, AdiParseError>
         }
     };
 
+    let records = adi_parse_records(&mut aps)?;
+
     Ok(AdiFile {
         adi_header: header,
-        adi_records: vec![] // XXX
+        adi_records: records
     })
 }
 
@@ -580,6 +582,8 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         }
     }
 
+    adi_parse_consume_until_lab(aps)?;
+
     //
     // At this point, we've read enough bytes to account for the value.  Discard
     // anything extra that we've accumulated.
@@ -594,6 +598,71 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         adif_bytes: fieldvalue,
         adif_type: None
     })
+}
+
+fn adi_parse_records(aps: &mut AdiParseState) ->
+    Result<Vec<AdiRecord>, AdiParseError>
+{
+    let mut records : Vec<AdiRecord> = Vec::new();
+
+    adi_parse_consume_until_lab(aps)?;
+
+    loop {
+        match adi_parse_peek_token(aps, 0)? {
+            AdiToken::ADI_TOK_EOF => {
+                break;
+            },
+            _ => {
+                records.push(adi_parse_record(aps)?);
+            }
+        }
+    }
+
+    return Ok(records);
+}
+
+fn adi_parse_record(aps: &mut AdiParseState) ->
+    Result<AdiRecord, AdiParseError>
+{
+    let mut record = AdiRecord {
+        adir_fields: vec![]
+    };
+
+    loop {
+        let t_lab = adi_parse_peek_token(aps, 0)?;
+        let t_fieldname = adi_parse_peek_token(aps, 1)?;
+        let t_indicator = adi_parse_peek_token(aps, 2)?;
+
+        print!("dap: record: {:?} {:?} {:?}\n", t_lab, t_fieldname, t_indicator);
+        match (t_lab, t_fieldname, t_indicator) {
+            (AdiToken::ADI_TOK_LAB, AdiToken::ADI_TOK_TEXT(ref s),
+                AdiToken::ADI_TOK_RAB) if s.to_lowercase() == "eor" => {
+                adi_parse_consume_tokens(aps, 3);
+                adi_parse_consume_until_lab(aps)?;
+                break;
+            }
+            _ => {
+                record.adir_fields.push(adi_parse_data_specifier(aps)?);
+            }
+        }
+    }
+
+    return Ok(record);
+}
+
+fn adi_parse_consume_until_lab(aps: &mut AdiParseState) ->
+    Result<(), AdiParseError>
+{
+    loop {
+        let t_next = adi_parse_peek_token(aps, 0)?;
+        match t_next {
+            AdiToken::ADI_TOK_LAB => break,
+            AdiToken::ADI_TOK_EOF => break,
+            _ => adi_parse_consume_tokens(aps, 1)
+        }
+    }
+
+    return Ok(());
 }
 
 #[cfg(test)]
@@ -702,6 +771,13 @@ mod test {
         parse_test_string(r"foobar<eoh:3>789");
         parse_test_string(r"foobar<foo:3>123<eoh>");
         parse_test_string(r"preamble<foo:3>12345<bar:7>123456789<eoh>");
+        parse_test_string(r"preamble<foo:3>12345<bar:7>123456789<eoh>
+            <call:6>kk6zbi
+            <junk:3>123456
+            <eor>
+            <call:6>kb1hcn
+            <junk:7>123456789:0
+            <eor>");
 
         // XXX test something
     }
