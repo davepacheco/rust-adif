@@ -18,9 +18,8 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Cursor;
 
-// XXX This can't be the right way to do this.
-#[path="adifutil.rs"]
-mod adifutil;
+use super::adifutil;
+use super::AdifParseError;
 
 //
 // Special strings
@@ -135,29 +134,10 @@ fn adi_dump_record(rec : &AdiRecord, output: &mut String)
 //
 // High-level function for parsing an ADI file represented in the given string.
 //
-pub fn adi_parse_string(source: &str) -> Result<AdiFile, AdiParseError>
+pub fn adi_parse_string(source: &str) -> Result<AdiFile, AdifParseError>
 {
     let mut source_reader = Cursor::new(source);
     adi_parse(&mut source_reader)
-}
-
-//
-// AdiParseError is used to represent any sort of operational error we may
-// encounter during parsing.
-//
-
-#[allow(non_camel_case_types)]
-#[derive(Debug)]
-pub enum AdiParseError {
-    ADI_IO(io::Error),                  // error from underlying I/O
-    ADI_BADINPUT(String),               // invalid input
-    ADI_NOT_YET_IMPLEMENTED(String),    // feature that's not yet implemented
-}
-
-impl From<io::Error> for AdiParseError {
-    fn from(error: io::Error) -> Self {
-        AdiParseError::ADI_IO(error)
-    }
 }
 
 //
@@ -198,7 +178,7 @@ fn adi_token_text(token: &AdiToken) -> String
 // representation of the token.
 //
 fn adi_token_string(token: &AdiToken, label : &str) ->
-    Result<String, AdiParseError>
+    Result<String, AdifParseError>
 {
     if let AdiToken::ADI_TOK_BYTES(buf) = token {
         let mut i = 0;
@@ -217,7 +197,7 @@ fn adi_token_string(token: &AdiToken, label : &str) ->
             if !c.is_ascii() ||
                (c.is_ascii_control() && c != '\r' && c != '\n') {
                 // TODO add byte offset
-                return Err(AdiParseError::ADI_BADINPUT(format!(
+                return Err(AdifParseError::ADIF_EBADINPUT(format!(
                     "{}: expected ASCII character, but found byte 0x{:x}",
                     label, buf[i])));
             }
@@ -230,7 +210,7 @@ fn adi_token_string(token: &AdiToken, label : &str) ->
         //
         return Ok(String::from_utf8(buf.clone()).unwrap());
     } else {
-        return Err(AdiParseError::ADI_BADINPUT(format!(
+        return Err(AdifParseError::ADIF_EBADINPUT(format!(
             "{}: expected ASCII string, but found {}", label,
             adi_token_text(token))));
     }
@@ -240,7 +220,7 @@ fn adi_token_string(token: &AdiToken, label : &str) ->
 // Low-level function that reads the next token from the underlying stream.
 //
 fn adi_import_read_token(source : &mut BufRead) ->
-    Result<AdiToken, AdiParseError>
+    Result<AdiToken, AdifParseError>
 {
 
     let c = {
@@ -360,7 +340,7 @@ struct AdiParseState<'a> {
 // token.
 //
 fn adi_parse_advance_tokens(aps : &mut AdiParseState, howmany : u8) ->
-    Result<(), AdiParseError>
+    Result<(), AdifParseError>
 {
     assert!(!aps.aps_error);
     while !aps.aps_done && (howmany as usize) > aps.aps_tokens.len() {
@@ -408,7 +388,7 @@ fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
  * this token, they should call adi_parse_consume_tokens().
  */
 fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
-    Result<AdiToken, AdiParseError>
+    Result<AdiToken, AdifParseError>
 {
     adi_parse_advance_tokens(aps, which + 1)?;
 
@@ -430,7 +410,7 @@ fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
 //
 // General entry point for parsing an ADI file from an input source.
 //
-pub fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdiParseError>
+pub fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdifParseError>
 {
     let mut aps = AdiParseState {
         aps_source: Box::new(BufReader::new(source)),
@@ -457,7 +437,7 @@ pub fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdiParseError>
 //
 // Parse the header of an ADI file.
 //
-fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
+fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdifParseError>
 {
     let mut header_content : Vec<u8> = Vec::new();
     let mut header_fields : Vec<AdiDataSpecifier> = Vec::new();
@@ -513,7 +493,7 @@ fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
             },
 
             AdiToken::ADI_TOK_EOF => {
-                return Err(AdiParseError::ADI_BADINPUT(
+                return Err(AdifParseError::ADIF_EBADINPUT(
                     "unexpected end of input while reading header".to_string()));
             }
         }
@@ -548,7 +528,7 @@ fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 // handle the sequence above.
 //
 fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
-    Result<AdiDataSpecifier, AdiParseError>
+    Result<AdiDataSpecifier, AdifParseError>
 {
     assert_eq!(adi_parse_peek_token(aps, 0).unwrap(), AdiToken::ADI_TOK_LAB);
 
@@ -561,7 +541,7 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
     match t_colon {
         AdiToken::ADI_TOK_COLON => (),
         _ => {
-            return Err(AdiParseError::ADI_BADINPUT(format!(
+            return Err(AdifParseError::ADIF_EBADINPUT(format!(
                 "parsing data specifier: expected {}, but found {}",
                 adi_token_text(&AdiToken::ADI_TOK_COLON),
                 adi_token_text(&t_colon))));
@@ -579,12 +559,12 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
             // ensure that we fail gracefully if given something that would
             // otherwise attempt to use lots of memory.
             //
-            return Err(AdiParseError::ADI_BADINPUT(format!(
+            return Err(AdifParseError::ADIF_EBADINPUT(format!(
                 "parsing data specifier: max supported size is {} bytes",
                 ADI_MAX_FIELDLEN)));
         }
         Err(s) => {
-            return Err(AdiParseError::ADI_BADINPUT(format!(
+            return Err(AdifParseError::ADIF_EBADINPUT(format!(
                 "parsing data specifier length: {}", s)));
         }
     };
@@ -593,11 +573,11 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         AdiToken::ADI_TOK_RAB => (),
         AdiToken::ADI_TOK_COLON => {
             // TODO
-            return Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(String::from(
+            return Err(AdifParseError::ADIF_ENOT_YET_IMPLEMENTED(String::from(
                 "parsing data specifier: typed values are not supported")));
         },
         _ => {
-            return Err(AdiParseError::ADI_BADINPUT(format!(
+            return Err(AdifParseError::ADIF_EBADINPUT(format!(
                 "parsing data specifier: expected {}, but found {}",
                 adi_token_text(&AdiToken::ADI_TOK_RAB),
                 adi_token_text(&t_rab))));
@@ -628,7 +608,7 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
                 fieldvalue.extend(buf[0..nbytes].iter());
             }
             AdiToken::ADI_TOK_EOF => {
-                return Err(AdiParseError::ADI_BADINPUT(format!(
+                return Err(AdifParseError::ADIF_EBADINPUT(format!(
                     "parsing data specifier: unexpected {} in value",
                     adi_token_text(&AdiToken::ADI_TOK_EOF))));
             }
@@ -656,7 +636,7 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
 // Parse the body of the ADI input (i.e., everything after the header).
 //
 fn adi_parse_records(aps: &mut AdiParseState) ->
-    Result<Vec<AdiRecord>, AdiParseError>
+    Result<Vec<AdiRecord>, AdifParseError>
 {
     let mut records : Vec<AdiRecord> = Vec::new();
 
@@ -680,7 +660,7 @@ fn adi_parse_records(aps: &mut AdiParseState) ->
 // Parse a single record from the ADI file, including any trailing bytes.
 //
 fn adi_parse_record(aps: &mut AdiParseState) ->
-    Result<AdiRecord, AdiParseError>
+    Result<AdiRecord, AdifParseError>
 {
     let mut record = AdiRecord {
         adir_fields: vec![]
@@ -715,7 +695,7 @@ fn adi_parse_record(aps: &mut AdiParseState) ->
 // the value and before the next data specifier or "<eor>" indicator.
 //
 fn adi_parse_consume_until_lab(aps: &mut AdiParseState) ->
-    Result<(), AdiParseError>
+    Result<(), AdifParseError>
 {
     loop {
         let t_next = adi_parse_peek_token(aps, 0)?;
@@ -736,7 +716,7 @@ fn adi_parse_consume_until_lab(aps: &mut AdiParseState) ->
 #[cfg(test)]
 mod test {
     use std::io;
-    use super::AdiParseError;
+    use super::AdifParseError;
     use super::AdiToken;
 
     fn make_file_basic() -> super::AdiFile {
@@ -837,15 +817,15 @@ mod test {
     
             let rtoken = super::adi_import_read_token(&mut buffered);
             match rtoken {
-                Err(AdiParseError::ADI_IO(ioe)) => {
+                Err(AdifParseError::ADIF_EIO(ioe)) => {
                     println!("unexpected I/O error: {}", ioe);
                     return;
                 },
-                Err(AdiParseError::ADI_BADINPUT(msg)) => {
+                Err(AdifParseError::ADIF_EBADINPUT(msg)) => {
                     println!("bad input: {}", msg);
                     return;
                 },
-                Err(AdiParseError::ADI_NOT_YET_IMPLEMENTED(msg)) => {
+                Err(AdifParseError::ADIF_ENOT_YET_IMPLEMENTED(msg)) => {
                     println!("not yet implemented: {}", msg);
                     return;
                 },
@@ -910,7 +890,7 @@ mod test {
         test_print(super::adi_parse_string(s));
     }
 
-    fn test_print(r : Result<super::AdiFile, super::AdiParseError>) {
+    fn test_print(r : Result<super::AdiFile, super::AdifParseError>) {
         match r {
             Err(e) => {
                 println!("error:\n{:?}", e);

@@ -22,12 +22,33 @@
 use std::io;
 
 mod adi;
+mod adifutil;
 
 const ADIF_HEADER_ADIF_VER : &'static str = "adif_ver";
 const ADIF_HEADER_CREATED_TIMESTAMP : &'static str = "created_timestamp";
 const ADIF_HEADER_PROGRAMID : &'static str = "programid";
 const ADIF_HEADER_PROGRAMVERSION : &'static str = "programversion";
 const ADIF_HEADER_USERDEF : &'static str = "userdef";
+
+//
+// AdifParseError is used to represent any sort of operational error we may
+// encounter during parsing.
+//
+
+#[allow(non_camel_case_types)]
+#[derive(Debug)]
+pub enum AdifParseError {
+    ADIF_EIO(io::Error),                  // error from underlying I/O
+    ADIF_EBADINPUT(String),               // invalid input
+    ADIF_ENOT_YET_IMPLEMENTED(String),    // feature that's not yet implemented
+}
+
+impl From<io::Error> for AdifParseError {
+    fn from(error: io::Error) -> Self {
+        AdifParseError::ADIF_EIO(error)
+    }
+}
+
 
 pub fn adif_testparse(source : &mut io::Read) -> Result<String, String>
 {

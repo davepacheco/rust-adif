@@ -9,7 +9,6 @@ Current status:
   field values).
   - Then build the ADIF parser that takes as input an AdiFile and generates an
     AdifFile.
-  - Move AdiParseError into parent as AdifParseError
   - This should probably store header metadata as it processes the header, then
     use that as it processes each record (as opposed to taking another pass
     through the whole file to match up header metadata with each record)
