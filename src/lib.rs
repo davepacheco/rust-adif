@@ -19,12 +19,9 @@
 // By implementing v3, we support all v1 and v2 files.
 //
 
-// Types of ADIF files.  See above.
-#[allow(non_camel_case_types)]
-enum AdifFileType {
-    ADIF_FT_ADI,    /* ADI (forward-compatible from v1) */
-    ADIF_FT_ADX,    /* ADX (not supported) */
-}
+use std::io;
+
+mod adi;
 
 const ADIF_HEADER_ADIF_VER : &'static str = "adif_ver";
 const ADIF_HEADER_CREATED_TIMESTAMP : &'static str = "created_timestamp";
@@ -32,4 +29,20 @@ const ADIF_HEADER_PROGRAMID : &'static str = "programid";
 const ADIF_HEADER_PROGRAMVERSION : &'static str = "programversion";
 const ADIF_HEADER_USERDEF : &'static str = "userdef";
 
-mod adi;
+pub fn adif_testparse(source : &mut io::Read) -> Result<String, String>
+{
+    // TODO flesh out
+    match adi::adi_parse(source) {
+        Ok(r) => Ok(format!("{}", adi::adi_dump(r))),
+        Err(e) => Err(format!("error: {:?}", e))
+    }
+}
+
+pub fn adif_testparse_string(source : &str) -> Result<String, String>
+{
+    // TODO should remove adi_parse_string() and do that work here instead?
+    match adi::adi_parse_string(source) {
+        Ok(r) => Ok(format!("{}", adi::adi_dump(r))),
+        Err(e) => Err(format!("error: {:?}", e))
+    }
+}

@@ -1,23 +1,21 @@
 Current status:
 
-- Working on ADI parser that takes a raw string and generates an AdiFile
-  - Finished parsing records!
-  - Going through lib/adi.rs and documenting code and cleaning it up.  Got to
-    adi_parse_consume_tokens().
-  - next: switch from string to bytes
-- Back to the structures for the "physical" representation of the file ("ADI").
-  - See XXXs and TODOs
-  - Build out physical types?
+- Build a driver program (or a few?) with a few basic functions:
+  - import file and report on it?
+    - try this with my existing log files
+  - import file and export the parsed version again?
 - Build the higher level, in terms of an AdifFile (as opposed to AdiFile?) with
   an AdifHeader and list of AdifRecords (which would have maps of field names to
   field values).
-- Then build the ADIF parser that takes as input an AdiFile and generates an
-  AdifFile.
-- Build a driver program (or a few?) with a few basic functions:
-  - import file and report on it?
-  - import file and export the parsed version again?
+  - Then build the ADIF parser that takes as input an AdiFile and generates an
+    AdifFile.
+  - Move AdiParseError into parent as AdifParseError
+  - This should probably store header metadata as it processes the header, then
+    use that as it processes each record (as opposed to taking another pass
+    through the whole file to match up header metadata with each record)
 
 General issues:
 - I think it's a general bug that if there are two STRING tokens together, they
-  don't get concatenated as they should.  Maybe this can be addressed with the
-  above refactor?
+  don't get concatenated as they should.
+- should "<eor>" and "<eoh>" (case-insensitively) be their own tokens?  would
+  require more lookahead in the tokenizer.

@@ -12,10 +12,15 @@
 // low-level ADI elements.
 //
 
+use std::cmp;
 use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Cursor;
+
+// XXX This can't be the right way to do this.
+#[path="adifutil.rs"]
+mod adifutil;
 
 //
 // Special strings
@@ -43,7 +48,7 @@ pub struct AdiFile {
 // AdiHeader: represents the header in an ADI file, if present.
 //
 pub struct AdiHeader {
-    pub adih_content : String,                  // complete header content
+    pub adih_content : Vec<u8>,                 // complete header content
     pub adih_fields : Vec<AdiDataSpecifier>     // header data specifiers
 }
 
@@ -69,8 +74,7 @@ pub struct AdiDataSpecifier {
     pub adif_name : String,         // name of the field
     pub adif_name_canon : String,   // canonicalized name (lowercase)
     pub adif_length : usize,        // size in bytes of the field's value
-    pub adif_bytes : String,        // contents of the field's value
-                                    // XXX should be a byte vector
+    pub adif_bytes : Vec<u8>,       // contents of the field's value
     pub adif_type : Option<String>  // type specifier for the field, if provided
 }
 
@@ -88,7 +92,8 @@ pub fn adi_dump(adf : AdiFile) -> String
     match adf.adi_header {
         None => output.push_str("(no header present)"),
         Some(adh) => {
-            output.push_str(&adh.adih_content);
+            output.push_str(String::from_utf8(
+                adh.adih_content).unwrap().as_str());
             for field in &adh.adih_fields {
                 output.push_str(&format!("{:?}\n", field));
             }
@@ -113,7 +118,8 @@ fn adi_dump_record(rec : &AdiRecord, output: &mut String)
             output.push_str(t.as_str());
         }
         output.push_str(">");
-        output.push_str(field.adif_bytes.to_string().as_str());
+        output.push_str(String::from_utf8(
+            field.adif_bytes.clone()).unwrap().as_str());
         output.push_str("\n");
     }
     output.push_str("<eor>\n");
@@ -164,7 +170,7 @@ impl From<io::Error> for AdiParseError {
 #[derive(PartialEq, Debug, Clone)]
 #[allow(non_camel_case_types)]
 enum AdiToken {
-    ADI_TOK_TEXT(String),   // arbitrary string content in the file
+    ADI_TOK_BYTES(Vec<u8>), // arbitrary byte content in the file
     ADI_TOK_LAB,            // '<'
     ADI_TOK_COLON,          // ':'
     ADI_TOK_RAB,            // '>'
@@ -179,12 +185,55 @@ enum AdiToken {
 fn adi_token_text(token: &AdiToken) -> String
 {
     String::from(match *token {
-        AdiToken::ADI_TOK_TEXT(_) => "string",
+        AdiToken::ADI_TOK_BYTES(_) => "bytes",
         AdiToken::ADI_TOK_LAB => "\"<\"",
         AdiToken::ADI_TOK_RAB => "\">\"",
         AdiToken::ADI_TOK_COLON => "\":\"",
         AdiToken::ADI_TOK_EOF => "end of input"
     })
+}
+
+//
+// Given a text token that must contain only ASCII bytes, return a String
+// representation of the token.
+//
+fn adi_token_string(token: &AdiToken, label : &str) ->
+    Result<String, AdiParseError>
+{
+    if let AdiToken::ADI_TOK_BYTES(buf) = token {
+        let mut i = 0;
+        for &cb in buf.iter() {
+            let c = cb as char;
+
+            //
+            // TODO there seems to be a bug in the spec, in that the header is
+            // defined to be a String, yet the examples contain newlines.  This
+            // appears intended to include MultilineString.
+            // Even so, the following validation isn't quite right, because
+            // MultiLine strings are only allowed to contain CR/LF
+            // consecutively, not a naked CR or LF or the reverse order, but
+            // we're not validating that here.
+            //
+            if !c.is_ascii() ||
+               (c.is_ascii_control() && c != '\r' && c != '\n') {
+                // TODO add byte offset
+                return Err(AdiParseError::ADI_BADINPUT(format!(
+                    "{}: expected ASCII character, but found byte 0x{:x}",
+                    label, buf[i])));
+            }
+        }
+
+        //
+        // It's impossible for String::from_utf8() to fail here, since we've
+        // already validated that every character is ASCII.
+        // TODO extra copy
+        //
+        return Ok(String::from_utf8(buf.clone()).unwrap());
+    } else {
+        return Err(AdiParseError::ADI_BADINPUT(format!(
+            "{}: expected ASCII string, but found {}", label,
+            adi_token_text(token))));
+    }
 }
 
 //
@@ -218,32 +267,11 @@ fn adi_import_read_token(source : &mut BufRead) ->
         return Ok(AdiToken::ADI_TOK_RAB);
     }
 
-    let (text, length) = {
+    let (bytes, length) = {
         let buf = source.fill_buf()?;
         let mut i = 0;
         loop {
             let c = buf[i] as char;
-
-            //
-            // TODO This validation is going to eventually have to move to a
-            // higher level of parsing, because technically arbitrary byte
-            // sequences can appear here.
-            // There also seems to be a bug in the spec, in that the header is
-            // defined to be a String, yet the examples contain newlines.  This
-            // appears intended to include MultilineString.
-            // Even so, the following validation isn't quite right, because
-            // MultiLine strings are only allowed to contain CR/LF
-            // consecutively, not a naked CR or LF or the reverse order, but
-            // we're not validating that here.
-            //
-            if !c.is_ascii() ||
-               (c.is_ascii_control() && c != '\r' && c != '\n') {
-                // TODO add byte offset
-                return Err(AdiParseError::ADI_BADINPUT(format!(
-                    "expected ASCII character, but found byte 0x{:x}",
-                    buf[i])));
-            }
-
             if c == '<' || c == ':' || c == '>' {
                 break;
             }
@@ -254,15 +282,11 @@ fn adi_import_read_token(source : &mut BufRead) ->
             }
         }
 
-        //
-        // It's impossible for String::from_utf8() to fail here, since we've
-        // already validated that every character is ASCII.
-        //
-        (String::from_utf8(buf[0..i].to_vec()).unwrap(), i)
+        (buf[0..i].to_vec(), i)
     };
 
     source.consume(length);
-    Ok(AdiToken::ADI_TOK_TEXT(text))
+    Ok(AdiToken::ADI_TOK_BYTES(bytes))
 }
 
 //
@@ -435,13 +459,13 @@ pub fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdiParseError>
 //
 fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 {
-    let mut header_content = String::new();
+    let mut header_content : Vec<u8> = Vec::new();
     let mut header_fields : Vec<AdiDataSpecifier> = Vec::new();
 
     loop {
         match adi_parse_peek_token(aps, 0)? {
-            AdiToken::ADI_TOK_TEXT(s) => {
-                header_content.push_str(s.as_str());
+            AdiToken::ADI_TOK_BYTES(b) => {
+                header_content.extend(b);
                 adi_parse_consume_tokens(aps, 1);
             },
 
@@ -453,18 +477,18 @@ fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
             // TODO record a warning?
             //
             AdiToken::ADI_TOK_COLON => {
-                header_content.push_str(":");
+                header_content.push(':' as u8);
                 adi_parse_consume_tokens(aps, 1);
             },
             AdiToken::ADI_TOK_RAB => {
-                header_content.push_str(">");
+                header_content.push('>' as u8);
                 adi_parse_consume_tokens(aps, 1);
             },
 
             AdiToken::ADI_TOK_LAB => {
                 let next = adi_parse_peek_token(aps, 1)?;
-                if let AdiToken::ADI_TOK_TEXT(s) = &next {
-                    if s.to_lowercase() == ADI_STR_EOH {
+                if let AdiToken::ADI_TOK_BYTES(s) = &next {
+                    if adifutil::byteseq_equal_ci(s, ADI_STR_EOH) {
                         let next2 = adi_parse_peek_token(aps, 2)?;
                         if next2 == AdiToken::ADI_TOK_RAB {
                             //
@@ -533,15 +557,7 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
     let t_fieldlength = adi_parse_peek_token(aps, 3)?;
     let t_rab         = adi_parse_peek_token(aps, 4)?;
 
-    let fieldname = match t_fieldname {
-        AdiToken::ADI_TOK_TEXT(s) => s,
-        _ => {
-            return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier: expected string for field name, but \
-                found {}", adi_token_text(&t_fieldname))));
-        }
-    };
-
+    let fieldname = adi_token_string(&t_fieldname, "parsing data specifier")?;
     match t_colon {
         AdiToken::ADI_TOK_COLON => (),
         _ => {
@@ -552,15 +568,8 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         }
     };
 
-    let fieldlength_str = match t_fieldlength {
-        AdiToken::ADI_TOK_TEXT(s) => s,
-        _ => {
-            return Err(AdiParseError::ADI_BADINPUT(format!(
-                "parsing data specifier length: expected field length, \
-                but found {}", adi_token_text(&t_fieldlength))));
-        }
-    };
-
+    let fieldlength_str = adi_token_string(&t_fieldlength,
+        "parsing data specifier length")?;
     let fieldlength_result = fieldlength_str.parse::<usize>();
     let fieldlength = match fieldlength_result {
         Ok(n) if n <= ADI_MAX_FIELDLEN => n,
@@ -595,23 +604,28 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         }
     };
 
+    //
+    // TODO this could be more efficient in the common case that the token
+    // contains at least the entire string that we care about.
+    //
     adi_parse_consume_tokens(aps, 5);
-    let mut fieldvalue = String::new();
+    let mut fieldvalue : Vec<u8> = Vec::with_capacity(fieldlength);
     while fieldlength > fieldvalue.len() {
         let t_value = adi_parse_peek_token(aps, 0)?;
         adi_parse_consume_tokens(aps, 1);
         match t_value {
             AdiToken::ADI_TOK_COLON => {
-                fieldvalue.push_str("<");
+                fieldvalue.push('<' as u8);
             }
             AdiToken::ADI_TOK_RAB => {
-                fieldvalue.push_str(">");
+                fieldvalue.push('>' as u8);
             }
             AdiToken::ADI_TOK_LAB => {
-                fieldvalue.push_str("<");
+                fieldvalue.push('<' as u8);
             }
-            AdiToken::ADI_TOK_TEXT(s) => {
-                fieldvalue.push_str(&s);
+            AdiToken::ADI_TOK_BYTES(buf) => {
+                let nbytes = cmp::min(buf.len(), fieldlength - fieldvalue.len());
+                fieldvalue.extend(buf[0..nbytes].iter());
             }
             AdiToken::ADI_TOK_EOF => {
                 return Err(AdiParseError::ADI_BADINPUT(format!(
@@ -624,11 +638,10 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
     adi_parse_consume_until_lab(aps)?;
 
     //
-    // At this point, we've read enough bytes to account for the value.  Discard
-    // anything extra that we've accumulated.
-    // TODO this only works for ASCII.
+    // At this point, we should have read exactly the number of bytes in the
+    // value.
     //
-    fieldvalue.truncate(fieldlength);
+    assert_eq!(fieldvalue.len(), fieldlength);
 
     Ok(AdiDataSpecifier {
         adif_name_canon: fieldname.to_lowercase(),
@@ -679,8 +692,10 @@ fn adi_parse_record(aps: &mut AdiParseState) ->
         let t_indicator = adi_parse_peek_token(aps, 2)?;
 
         match (t_lab, t_fieldname, t_indicator) {
-            (AdiToken::ADI_TOK_LAB, AdiToken::ADI_TOK_TEXT(ref s),
-                AdiToken::ADI_TOK_RAB) if s.to_lowercase() == ADI_STR_EOR => {
+            (AdiToken::ADI_TOK_LAB,
+            AdiToken::ADI_TOK_BYTES(ref s),
+            AdiToken::ADI_TOK_RAB) if adifutil::byteseq_equal_ci(
+            s, ADI_STR_EOR) => {
                 adi_parse_consume_tokens(aps, 3);
                 adi_parse_consume_until_lab(aps)?;
                 break;
@@ -734,7 +749,8 @@ mod test {
     }
 
     fn make_file_header() -> super::AdiFile {
-        let headerstr = String::from("This is a test file!\n");
+        let headerstr = String::from(
+            "This is a test file!\n").as_bytes().to_vec();
         let header = super::AdiHeader {
             adih_content: headerstr,
             adih_fields: vec![]
@@ -748,14 +764,15 @@ mod test {
 
     fn make_file_complex() -> super::AdiFile {
         let headerstr = String::from(
-            r#"This is a string.<adif_VERSion:3>1.0\nMore content"#);
+            r#"This is a string.<adif_VERSion:3>1.0\nMore content"#).
+            as_bytes().to_vec();
         let header = super::AdiHeader {
             adih_content: headerstr,
             adih_fields: vec![ super::AdiDataSpecifier {
                 adif_name: String::from("adif_VERSion"),
                 adif_name_canon: String::from("adif_version"),
                 adif_length: 3,
-                adif_bytes: String::from("1.0"),
+                adif_bytes: String::from("1.0").as_bytes().to_vec(),
                 adif_type: None
             } ]
         };
@@ -766,7 +783,7 @@ mod test {
                         adif_name: String::from("call"),
                         adif_name_canon: String::from("call"),
                         adif_length: 6,
-                        adif_bytes: String::from("KK6ZBI"),
+                        adif_bytes: String::from("KK6ZBI").as_bytes().to_vec(),
                         adif_type: None
                     },
 
@@ -774,7 +791,7 @@ mod test {
                         adif_name: String::from("QSO_date"),
                         adif_name_canon: String::from("qso_date"),
                         adif_length: 8,
-                        adif_bytes: String::from("20181129"),
+                        adif_bytes: String::from("20181129").as_bytes().to_vec(),
                         adif_type: None
                     }
                 ]
@@ -785,7 +802,7 @@ mod test {
                         adif_name: String::from("call"),
                         adif_name_canon: String::from("call"),
                         adif_length: 6,
-                        adif_bytes: String::from("KB1HCN"),
+                        adif_bytes: String::from("KB1HCN").as_bytes().to_vec(),
                         adif_type: Some(String::from("S"))
                     },
 
@@ -793,7 +810,7 @@ mod test {
                         adif_name: String::from("QSO_date"),
                         adif_name_canon: String::from("qso_date"),
                         adif_length: 8,
-                        adif_bytes: String::from("20181130"),
+                        adif_bytes: String::from("20181130").as_bytes().to_vec(),
                         adif_type: None
                     }
                 ]
@@ -842,8 +859,9 @@ mod test {
                 Ok(AdiToken::ADI_TOK_COLON) => {
                     println!("token: ':'");
                 },
-                Ok(AdiToken::ADI_TOK_TEXT(t)) => {
-                     println!("token: raw text: {}", t);
+                Ok(AdiToken::ADI_TOK_BYTES(buf)) => {
+                     println!("token: raw bytes: {}",
+                        String::from_utf8(buf).unwrap());
                 },
                 Ok(AdiToken::ADI_TOK_EOF) => {
                     println!("token: EOF");
