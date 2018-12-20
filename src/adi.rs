@@ -81,7 +81,8 @@ pub struct AdiDataSpecifier {
 //
 // Dump an ADI file to a string, in a format intended for debugging.
 //
-pub fn adi_dump(adf : AdiFile) -> String {
+pub fn adi_dump(adf : AdiFile) -> String
+{
     let mut output = String::new();
 
     match adf.adi_header {
@@ -102,7 +103,8 @@ pub fn adi_dump(adf : AdiFile) -> String {
     return output
 }
 
-fn adi_dump_record(rec : &AdiRecord, output: &mut String) {
+fn adi_dump_record(rec : &AdiRecord, output: &mut String)
+{
     for field in &rec.adir_fields {
         output.push_str(format!("    <{}:{}", field.adif_name_canon.as_str(),
             field.adif_length.to_string().as_str()).as_str());
@@ -127,7 +129,8 @@ fn adi_dump_record(rec : &AdiRecord, output: &mut String) {
 //
 // High-level function for parsing an ADI file represented in the given string.
 //
-pub fn adi_parse_string(source: &str) -> Result<AdiFile, AdiParseError> {
+pub fn adi_parse_string(source: &str) -> Result<AdiFile, AdiParseError>
+{
     let mut source_reader = Cursor::new(source);
     adi_parse(&mut source_reader)
 }
@@ -376,6 +379,10 @@ fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
     }
 }
 
+/*
+ * Examine the Nth token from the start of unconsumed input.  If callers process
+ * this token, they should call adi_parse_consume_tokens().
+ */
 fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
     Result<AdiToken, AdiParseError>
 {
@@ -396,7 +403,10 @@ fn adi_parse_peek_token<'a>(aps : &'a mut AdiParseState, which : u8) ->
     return Ok(aps.aps_tokens[aps.aps_tokens.len() - 1].clone());
 }
 
-fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdiParseError>
+//
+// General entry point for parsing an ADI file from an input source.
+//
+pub fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdiParseError>
 {
     let mut aps = AdiParseState {
         aps_source: Box::new(BufReader::new(source)),
@@ -420,6 +430,9 @@ fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdiParseError>
     })
 }
 
+//
+// Parse the header of an ADI file.
+//
 fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 {
     let mut header_content = String::new();
@@ -434,9 +447,9 @@ fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 
             //
             // Although it seems crazy, the ADIF specification does not say
-            // anything wrong with having these special characters loose in the
-            // header (i.e., not following a "<").  We thus treat these as
-            // plain text.
+            // there's anything wrong with having these special characters
+            // loose in the header (i.e., not following a "<").  We thus treat
+            // these as plain text.
             // TODO record a warning?
             //
             AdiToken::ADI_TOK_COLON => {
@@ -489,6 +502,9 @@ fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 }
 
 //
+// Parses a data specifier.  The caller is responsible for ensuring that the
+// first token is a left angle bracket before invoking this function.
+//
 // There are two valid token sequences here.  Below is the simple case:
 //
 //   <FIELDNAME:FIELDLEN>FIELDVALUE_...<
@@ -506,9 +522,6 @@ fn adi_parse_header(aps: &mut AdiParseState) -> Result<AdiHeader, AdiParseError>
 // ADI also allows an additional colon (COLON) and type specifier (STRING)
 // directly after the field length.  We do not yet support this, so we only
 // handle the sequence above.
-//
-// The caller is responsible for ensuring that the first token is a left angle
-// bracket before invoking this function.
 //
 fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
     Result<AdiDataSpecifier, AdiParseError>
@@ -626,6 +639,9 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
     })
 }
 
+//
+// Parse the body of the ADI input (i.e., everything after the header).
+//
 fn adi_parse_records(aps: &mut AdiParseState) ->
     Result<Vec<AdiRecord>, AdiParseError>
 {
@@ -647,6 +663,9 @@ fn adi_parse_records(aps: &mut AdiParseState) ->
     return Ok(records);
 }
 
+//
+// Parse a single record from the ADI file, including any trailing bytes.
+//
 fn adi_parse_record(aps: &mut AdiParseState) ->
     Result<AdiRecord, AdiParseError>
 {
@@ -675,6 +694,11 @@ fn adi_parse_record(aps: &mut AdiParseState) ->
     return Ok(record);
 }
 
+//
+// Consume tokens until the next left angle bracket or end-of-file.  This is
+// useful because ADI allows any data specifier to contain arbitrary bytes after
+// the value and before the next data specifier or "<eor>" indicator.
+//
 fn adi_parse_consume_until_lab(aps: &mut AdiParseState) ->
     Result<(), AdiParseError>
 {
@@ -690,6 +714,10 @@ fn adi_parse_consume_until_lab(aps: &mut AdiParseState) ->
     return Ok(());
 }
 
+//
+// Currently, the test module is mostly used for ad hoc tests to exercise the
+// code we have so far.  This is far from exhaustive.
+//
 #[cfg(test)]
 mod test {
     use std::io;
@@ -826,7 +854,7 @@ mod test {
     }
 
     #[test]
-    pub fn do_stuff() {
+    fn do_stuff() {
         let adf = make_file_basic();
         println!("{}", super::adi_dump(adf));
         let adf = make_file_header();

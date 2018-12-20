@@ -4,6 +4,7 @@ Current status:
   - Finished parsing records!
   - Going through lib/adi.rs and documenting code and cleaning it up.  Got to
     adi_parse_consume_tokens().
+  - next: switch from string to bytes
 - Back to the structures for the "physical" representation of the file ("ADI").
   - See XXXs and TODOs
   - Build out physical types?
