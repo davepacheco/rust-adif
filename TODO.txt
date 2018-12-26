@@ -1,9 +1,6 @@
 Current status:
 
-- Build a driver program (or a few?) with a few basic functions:
-  - import file and report on it?
-    - try this with my existing log files
-  - import file and export the parsed version again?
+- Just finished building driver program and running it on a test file
 - Build the higher level, in terms of an AdifFile (as opposed to AdiFile?) with
   an AdifHeader and list of AdifRecords (which would have maps of field names to
   field values).
@@ -12,9 +9,11 @@ Current status:
   - This should probably store header metadata as it processes the header, then
     use that as it processes each record (as opposed to taking another pass
     through the whole file to match up header metadata with each record)
+- More CLI programs:
+  - basic reporting program
+  - import/export exerciser
 
-General issues:
-- I think it's a general bug that if there are two STRING tokens together, they
-  don't get concatenated as they should.
+Design notes:
 - should "<eor>" and "<eoh>" (case-insensitively) be their own tokens?  would
-  require more lookahead in the tokenizer.
+  require more lookahead in the tokenizer. (probably not because that text
+  should be legal inside values)

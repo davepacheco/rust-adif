@@ -20,6 +20,7 @@
 //
 
 use std::io;
+use std::fmt;
 
 mod adi;
 mod adifutil;
@@ -49,21 +50,39 @@ impl From<io::Error> for AdifParseError {
     }
 }
 
+impl fmt::Display for AdifParseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            AdifParseError::ADIF_EIO(ioerror) => {
+                write!(f, "{}", ioerror.to_string())
+            },
+            AdifParseError::ADIF_EBADINPUT(message) => {
+                write!(f, "input error: {}", message)
+            },
+            AdifParseError::ADIF_ENOT_YET_IMPLEMENTED(message) => {
+                write!(f, "not yet implemented: {}", message)
+            }
+        }
+    }
+}
 
-pub fn adif_testparse(source : &mut io::Read) -> Result<String, String>
+//
+// These entry points are provided for now just for testing.
+//
+pub fn adif_testparse_adi(source : &mut io::Read) -> Result<String, String>
 {
     // TODO flesh out
     match adi::adi_parse(source) {
         Ok(r) => Ok(format!("{}", adi::adi_dump(r))),
-        Err(e) => Err(format!("error: {:?}", e))
+        Err(e) => Err(format!("{}", e))
     }
 }
 
-pub fn adif_testparse_string(source : &str) -> Result<String, String>
+pub fn adif_testparse_adi_string(source : &str) -> Result<String, String>
 {
     // TODO should remove adi_parse_string() and do that work here instead?
     match adi::adi_parse_string(source) {
         Ok(r) => Ok(format!("{}", adi::adi_dump(r))),
-        Err(e) => Err(format!("error: {:?}", e))
+        Err(e) => Err(format!("{}", e))
     }
 }

@@ -164,13 +164,37 @@ enum AdiToken {
 //
 fn adi_token_text(token: &AdiToken) -> String
 {
-    String::from(match *token {
-        AdiToken::ADI_TOK_BYTES(_) => "bytes",
-        AdiToken::ADI_TOK_LAB => "\"<\"",
-        AdiToken::ADI_TOK_RAB => "\">\"",
-        AdiToken::ADI_TOK_COLON => "\":\"",
-        AdiToken::ADI_TOK_EOF => "end of input"
-    })
+    match *token {
+        AdiToken::ADI_TOK_BYTES(ref buf) => {
+            //
+            // In the common case where this byte sequence represents a UTF8
+            // string, it's helpful if the return value shows some of the
+            // string.  We don't want to include more than a few characters of a
+            // long string, and we don't want to fail if we can't convert the
+            // byte sequence (since that might just mean this is part of a
+            // binary value and not a UTF8 string at all).  Make our best effort
+            // here.
+            let sample_len = cmp::min(buf.len(), 32);
+            let sample_bytes = buf[0..sample_len].to_vec();
+            match String::from_utf8(sample_bytes) {
+                Ok(s) => {
+                    let mut sample_str = String::new();
+                    sample_str.push_str("\"");
+                    sample_str.push_str(&s);
+                    if sample_len < buf.len() {
+                        sample_str.push_str("...");
+                    }
+                    sample_str.push_str("\"");
+                    sample_str
+                },
+                Err(_) => String::from("(non-UTF8 bytes)")
+            }
+        }
+        AdiToken::ADI_TOK_LAB => String::from("\"<\""),
+        AdiToken::ADI_TOK_RAB => String::from("\">\""),
+        AdiToken::ADI_TOK_COLON => String::from("\":\""),
+        AdiToken::ADI_TOK_EOF => String::from("end of input")
+    }
 }
 
 //
@@ -247,26 +271,45 @@ fn adi_import_read_token(source : &mut BufRead) ->
         return Ok(AdiToken::ADI_TOK_RAB);
     }
 
-    let (bytes, length) = {
-        let buf = source.fill_buf()?;
-        let mut i = 0;
-        loop {
-            let c = buf[i] as char;
-            if c == '<' || c == ':' || c == '>' {
-                break;
+    //
+    // This function returns one ADI_TOK_BYTES token comprising an entire
+    // sequence of bytes not interrupted by some other token (e.g., "<", ":", or
+    // ">").  That means we may read quite a lot into memory if the file
+    // contains very long values.  The alternative would be to split this into
+    // multiple ADI_TOK_BYTES tokens and require that the caller concatenate if
+    // it wants to.
+    // TODO Is that a good choice?  Caller already needs to concatenate when a
+    // byte sequence can contain "<", ":", or ">".
+    //
+    let mut buf : Vec<u8> = Vec::new();
+    let mut done = false;
+    while !done {
+        let consumed = {
+            let chunk = source.fill_buf()?;
+            let mut i = 0;
+
+            if chunk.len() == 0 {
+                done = true;
             }
 
-            i += 1;
-            if i == buf.len() {
-                break;
+            while i < chunk.len() {
+                let c = chunk[i] as char;
+                if c == '<' || c == ':' || c == '>' {
+                    done = true;
+                    break;
+                }
+
+                buf.push(chunk[i]);
+                i += 1;
             }
-        }
 
-        (buf[0..i].to_vec(), i)
-    };
+            i
+        };
 
-    source.consume(length);
-    Ok(AdiToken::ADI_TOK_BYTES(bytes))
+        source.consume(consumed);
+    }
+
+    Ok(AdiToken::ADI_TOK_BYTES(buf))
 }
 
 //
@@ -313,7 +356,8 @@ struct AdiParseState<'a> {
     aps_source : Box<BufRead + 'a>,     // underlying source of ADI input
     aps_tokens : Vec<AdiToken>,         // next unconsumed tokens
     aps_error : bool,                   // if true, we've encountered an error
-    aps_done : bool                     // if true, we've read EOF
+    aps_done : bool,                    // if true, we've read EOF
+    aps_bytes_consumed : usize          // bytes of input consumed
 }
 
 //
@@ -378,8 +422,15 @@ fn adi_parse_consume_tokens(aps : &mut AdiParseState, howmany : u8)
     // TODO there's probably a more efficient way to do this.
     let mut count = 0;
     while count < howmany {
-        aps.aps_tokens.remove(0);
+        let removed = aps.aps_tokens.remove(0);
         count += 1;
+        aps.aps_bytes_consumed += match removed {
+            AdiToken::ADI_TOK_LAB => "<".len(),
+            AdiToken::ADI_TOK_RAB => ">".len(),
+            AdiToken::ADI_TOK_COLON => ":".len(),
+            AdiToken::ADI_TOK_BYTES(b) => b.len(),
+            AdiToken::ADI_TOK_EOF => panic!("attempted to consume EOF")
+        }
     }
 }
 
@@ -416,7 +467,8 @@ pub fn adi_parse(source: &mut io::Read) -> Result<AdiFile, AdifParseError>
         aps_source: Box::new(BufReader::new(source)),
         aps_tokens: Vec::new(),
         aps_error: false,
-        aps_done: false
+        aps_done: false,
+        aps_bytes_consumed: 0
     };
 
     let header = match adi_parse_peek_token(&mut aps, 0)? {
@@ -542,14 +594,17 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         AdiToken::ADI_TOK_COLON => (),
         _ => {
             return Err(AdifParseError::ADIF_EBADINPUT(format!(
-                "parsing data specifier: expected {}, but found {}",
+                "parsing data specifier (near byte {}): expected {}, \
+                but found {}",
+                aps.aps_bytes_consumed,
                 adi_token_text(&AdiToken::ADI_TOK_COLON),
                 adi_token_text(&t_colon))));
         }
     };
 
     let fieldlength_str = adi_token_string(&t_fieldlength,
-        "parsing data specifier length")?;
+        &format!("parsing data specifier (near byte {}) length",
+        aps.aps_bytes_consumed))?;
     let fieldlength_result = fieldlength_str.parse::<usize>();
     let fieldlength = match fieldlength_result {
         Ok(n) if n <= ADI_MAX_FIELDLEN => n,
@@ -560,12 +615,15 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
             // otherwise attempt to use lots of memory.
             //
             return Err(AdifParseError::ADIF_EBADINPUT(format!(
-                "parsing data specifier: max supported size is {} bytes",
+                "parsing data specifier (near byte {}): \
+                max supported size is {} bytes",
+                aps.aps_bytes_consumed,
                 ADI_MAX_FIELDLEN)));
         }
         Err(s) => {
             return Err(AdifParseError::ADIF_EBADINPUT(format!(
-                "parsing data specifier length: {}", s)));
+                "parsing data specifier (near byte {}) length: {}",
+                aps.aps_bytes_consumed, s)));
         }
     };
 
@@ -573,12 +631,14 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         AdiToken::ADI_TOK_RAB => (),
         AdiToken::ADI_TOK_COLON => {
             // TODO
-            return Err(AdifParseError::ADIF_ENOT_YET_IMPLEMENTED(String::from(
-                "parsing data specifier: typed values are not supported")));
+            return Err(AdifParseError::ADIF_ENOT_YET_IMPLEMENTED(format!(
+                "parsing data specifier (near byte {}): \
+                typed values are not supported", aps.aps_bytes_consumed)));
         },
         _ => {
             return Err(AdifParseError::ADIF_EBADINPUT(format!(
-                "parsing data specifier: expected {}, but found {}",
+                "parsing data specifier (near byte {}): \
+                expected {}, but found {}", aps.aps_bytes_consumed,
                 adi_token_text(&AdiToken::ADI_TOK_RAB),
                 adi_token_text(&t_rab))));
         }
@@ -609,7 +669,8 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
             }
             AdiToken::ADI_TOK_EOF => {
                 return Err(AdifParseError::ADIF_EBADINPUT(format!(
-                    "parsing data specifier: unexpected {} in value",
+                    "parsing data specifier (near byte {}): \
+                    unexpected {} in value", aps.aps_bytes_consumed,
                     adi_token_text(&AdiToken::ADI_TOK_EOF))));
             }
         }
