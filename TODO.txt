@@ -13,6 +13,10 @@ Current status:
   - basic reporting program
   - import/export exerciser
 
+General TODO:
+- AdifParseError could be a struct with a byte offset, "location" string, and a
+  Kind field that looks like the Enum we have today
+
 Design notes:
 - should "<eor>" and "<eoh>" (case-insensitively) be their own tokens?  would
   require more lookahead in the tokenizer. (probably not because that text

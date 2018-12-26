@@ -84,15 +84,15 @@ pub struct AdiDataSpecifier {
 //
 // Dump an ADI file to a string, in a format intended for debugging.
 //
-pub fn adi_dump(adf : AdiFile) -> String
+pub fn adi_dump(adf : &AdiFile) -> String
 {
     let mut output = String::new();
 
     match adf.adi_header {
         None => output.push_str("(no header present)"),
-        Some(adh) => {
+        Some(ref adh) => {
             output.push_str(String::from_utf8(
-                adh.adih_content).unwrap().as_str());
+                adh.adih_content.clone()).unwrap().as_str());
             for field in &adh.adih_fields {
                 output.push_str(&format!("{:?}\n", field));
             }
@@ -655,7 +655,7 @@ fn adi_parse_data_specifier(aps : &mut AdiParseState) ->
         adi_parse_consume_tokens(aps, 1);
         match t_value {
             AdiToken::ADI_TOK_COLON => {
-                fieldvalue.push('<' as u8);
+                fieldvalue.push(':' as u8);
             }
             AdiToken::ADI_TOK_RAB => {
                 fieldvalue.push('>' as u8);

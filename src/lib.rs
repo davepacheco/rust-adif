@@ -23,13 +23,8 @@ use std::io;
 use std::fmt;
 
 mod adi;
+mod adif;
 mod adifutil;
-
-const ADIF_HEADER_ADIF_VER : &'static str = "adif_ver";
-const ADIF_HEADER_CREATED_TIMESTAMP : &'static str = "created_timestamp";
-const ADIF_HEADER_PROGRAMID : &'static str = "programid";
-const ADIF_HEADER_PROGRAMVERSION : &'static str = "programversion";
-const ADIF_HEADER_USERDEF : &'static str = "userdef";
 
 //
 // AdifParseError is used to represent any sort of operational error we may
@@ -69,20 +64,38 @@ impl fmt::Display for AdifParseError {
 //
 // These entry points are provided for now just for testing.
 //
-pub fn adif_testparse_adi(source : &mut io::Read) -> Result<String, String>
+pub fn adif_testparse_adi(label: &str, source : &mut io::Read) ->
+    Result<String, String>
 {
     // TODO flesh out
+    let mut rv = String::new();
     match adi::adi_parse(source) {
-        Ok(r) => Ok(format!("{}", adi::adi_dump(r))),
-        Err(e) => Err(format!("{}", e))
+        Ok(r) => {
+            rv.push_str(&format!("{}", adi::adi_dump(&r)));
+            rv.push_str("\n\n");
+            match adif::adif_parse(label, &r) {
+                Ok(adif) => {
+                    rv.push_str(&format!("{:?}\n", adif));
+                }
+                Err(e) => {
+                    rv.push_str(&format!("{}", e));
+                }
+            }
+        }
+        Err(e) => {
+            rv.push_str(&format!("{}", e));
+            return Err(rv);
+        }
     }
+
+    Ok(rv)
 }
 
 pub fn adif_testparse_adi_string(source : &str) -> Result<String, String>
 {
     // TODO should remove adi_parse_string() and do that work here instead?
     match adi::adi_parse_string(source) {
-        Ok(r) => Ok(format!("{}", adi::adi_dump(r))),
+        Ok(r) => Ok(format!("{}", adi::adi_dump(&r))),
         Err(e) => Err(format!("{}", e))
     }
 }

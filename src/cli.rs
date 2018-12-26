@@ -19,6 +19,6 @@ pub fn process_file(filename: &str) ->
         }
     };
 
-    print!("{}", adif::adif_testparse_adi(&mut file)?);
+    print!("{}", adif::adif_testparse_adi(filename, &mut file)?);
     Ok(())
 }
