@@ -1,20 +1,29 @@
 Current status:
+- have ADI importer
+- have ADIF layer that turns that into AdifFile
 
-- Building the higher level, in terms of an AdifFile (as opposed to AdiFile?)
-  with an AdifHeader and list of AdifRecords (which would have maps of field
-  names to field values).
-  - Then build the ADIF parser that takes as input an AdiFile and generates an
-    AdifFile.
+General TODO (not necessarily in this order):
+- AdifParseError could be a struct with a byte offset, "location" string, and a
+  Kind field that looks like the Enum we have today
+- Should AdifRecord have first-class fields for major fields like "call"?
+- Deal with differently-typed values better (i.e., if it's a date, represent it
+  with a date type)
+- Application-specific fields
   - This should probably store header metadata as it processes the header, then
     use that as it processes each record (as opposed to taking another pass
     through the whole file to match up header metadata with each record)
-- More CLI programs:
-  - basic reporting program
-  - import/export exerciser
-
-General TODO:
-- AdifParseError could be a struct with a byte offset, "location" string, and a
-  Kind field that looks like the Enum we have today
+- User-defined fields
+  - See note on app-specific fields
+- Clean up library interface?
+- Clean up internal interfaces
+- CLI programs:
+  - adif_dump: similar to what I've got today, dump contents in a plaintext
+    format (with different flags for verbosity levels?)
+  - adif_report: summarize QSOs in a file (e.g., by country, county, ...)
+  - adif_diff? diff two ADIF files
+  - adi_to_adx: would this be hard?
+- Add Rust documentation
+- Add Rust tests!
 
 Design notes:
 - should "<eor>" and "<eoh>" (case-insensitively) be their own tokens?  would
