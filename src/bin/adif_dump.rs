@@ -1,12 +1,15 @@
 //
-// src/main.rs: driver program for ADIF parser.  For now, this just parses the
-// given ADI file and dumps the result.
+// src/bin/adif_dump.rs: driver program for ADIF parser.  For now, this just
+// parses the given ADI file and dumps the result.
 //
 
 use std::env;
 use std::process;
 
 extern crate adif;
+
+// XXX This doesn't seem like the right way to do this.
+#[path = "../cli.rs"]
 mod cli;
 
 fn main() {
@@ -14,11 +17,11 @@ fn main() {
     let progname = if argv.len() > 0 { &argv[0] } else { "adif" };
 
     if argv.len() > 2 {
-        usage(progname, &"too many arguments");
+        usage(progname, "too many arguments");
     }
 
     if argv.len() < 2 {
-        usage(progname, &"expected argument");
+        usage(progname, "expected argument");
     }
 
     let filename = &argv[1];

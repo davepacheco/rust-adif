@@ -915,11 +915,11 @@ mod test {
     #[test]
     fn do_stuff() {
         let adf = make_file_basic();
-        println!("{}", super::adi_dump(adf));
+        println!("{}", super::adi_dump(&adf));
         let adf = make_file_header();
-        println!("{}", super::adi_dump(adf));
+        println!("{}", super::adi_dump(&adf));
         let adf = make_file_complex();
-        println!("{}", super::adi_dump(adf));
+        println!("{}", super::adi_dump(&adf));
         import_test(r#"
             header stuff here<eoh>
             <call:6>KK6ZBI
@@ -957,7 +957,7 @@ mod test {
                 println!("error:\n{:?}", e);
             },
             Ok(adf) => {
-                println!("success:\n{}", super::adi_dump(adf));
+                println!("success:\n{}", super::adi_dump(&adf));
             }
         }
     }
