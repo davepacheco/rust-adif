@@ -8,6 +8,8 @@
 use adi::AdiFile;
 use adi::AdiDataSpecifier;
 use super::AdifParseError;
+use std::collections::BTreeMap;
+use std::fmt;
 
 // Well-known header fields
 const ADIF_HEADER_ADIF_VER : &'static str = "adif_ver";
@@ -16,7 +18,6 @@ const ADIF_HEADER_PROGRAMID : &'static str = "programid";
 const ADIF_HEADER_PROGRAMVERSION : &'static str = "programversion";
 const ADIF_HEADER_USERDEF : &'static str = "userdef";
 
-#[derive(Debug)]
 pub struct AdifFile {
     // Well-known header fields
     pub adif_adif_version : Option<String>,     // XXX semver type?
@@ -34,12 +35,52 @@ pub struct AdifFile {
     pub adif_records : Vec<AdifRecord>,     // list of records in the file
 }
 
-#[derive(Debug)]
+impl fmt::Debug for AdifFile {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "ADIF file:  {}\n", self.adif_label)?;
+        write!(f, "Created at: {}\n",
+            match &self.adif_created_timestamp {
+                Some(p) => p,
+                None => "unknown"
+            })?;
+        write!(f, "Created by: {} {}\n",
+            match &self.adif_program_id {
+                Some(p) => format!("program \"{}\"", p),
+                None => String::from("unknown program")
+            },
+            match &self.adif_program_version {
+                Some(v) => format!("version \"{}\"", v),
+                None => String::from("unknown version")
+            })?;
+        write!(f, "Total records: {}\n", self.adif_records.len())?;
+
+        if self.adif_records.len() == 0 {
+            return Ok(());
+        }
+
+        write!(f, "Example record:\n")?;
+        write!(f, "{:?}\n", self.adif_records[0])
+    }
+}
+
 pub struct AdifRecord {
+    pub adir_field_values : BTreeMap<String, String> // XXX value type?
+}
+
+impl fmt::Debug for AdifRecord {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "RECORD:\n")?;
+
+        for (key, value) in self.adir_field_values.iter() {
+            write!(f, "    {:20}: {}\n", key, value)?;
+        }
+
+        Ok(())
+    }
 }
 
 // TODO Would this be better off accepting an iterator?
-pub fn adif_parse(label: &str, adi: &AdiFile) ->
+pub fn adif_parse_adi(label: &str, adi: &AdiFile) ->
     Result<AdifFile, AdifParseError>
 {
     let mut adif = AdifFile {
@@ -66,9 +107,36 @@ pub fn adif_parse(label: &str, adi: &AdiFile) ->
         }
     }
 
+    let mut which = 1;
+    for adr in &adi.adi_records {
+        let mut record_values : BTreeMap<String, String> = BTreeMap::new();
+
+        for adf in &adr.adir_fields {
+            // TODO presumably this is not legal ADIF?
+            if record_values.contains_key(&adf.adif_name_canon) {
+                return Err(AdifParseError::ADIF_EBADINPUT(format!(
+                    "record {}: duplicate value for field \"{}\"", which,
+                    adf.adif_name_canon)));
+            }
+
+            let value = adif_string(&adf)?;
+            record_values.insert(adf.adif_name_canon.clone(), value);
+        }
+
+        which += 1;
+        adif.adif_records.push(AdifRecord {
+            adir_field_values : record_values
+        });
+    }
+
     Ok(adif)
 }
 
+//
+// Given a data specifier describing a string-valued field, return a new String
+// containing the field's contents.  This returns an error if the field is not
+// string-valued or the value cannot be processed as UTF-8.
+//
 fn adif_string(adf: &AdiDataSpecifier) ->
     Result<String, AdifParseError>
 {

@@ -1,9 +1,8 @@
 Current status:
 
-- Just finished building driver program and running it on a test file
-- Build the higher level, in terms of an AdifFile (as opposed to AdiFile?) with
-  an AdifHeader and list of AdifRecords (which would have maps of field names to
-  field values).
+- Building the higher level, in terms of an AdifFile (as opposed to AdiFile?)
+  with an AdifHeader and list of AdifRecords (which would have maps of field
+  names to field values).
   - Then build the ADIF parser that takes as input an AdiFile and generates an
     AdifFile.
   - This should probably store header metadata as it processes the header, then

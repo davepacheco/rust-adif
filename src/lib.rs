@@ -73,7 +73,7 @@ pub fn adif_testparse_adi(label: &str, source : &mut io::Read) ->
         Ok(r) => {
             rv.push_str(&format!("{}", adi::adi_dump(&r)));
             rv.push_str("\n\n");
-            match adif::adif_parse(label, &r) {
+            match adif::adif_parse_adi(label, &r) {
                 Ok(adif) => {
                     rv.push_str(&format!("{:?}\n", adif));
                 }
