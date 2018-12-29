@@ -16,6 +16,8 @@ use std::cmp;
 use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
+
+#[cfg(test)]
 use std::io::Cursor;
 
 use super::adifutil;
@@ -84,6 +86,7 @@ pub struct AdiDataSpecifier {
 //
 // Dump an ADI file to a string, in a format intended for debugging.
 //
+#[cfg(test)]
 pub fn adi_dump(adf : &AdiFile) -> String
 {
     let mut output = String::new();
@@ -107,6 +110,7 @@ pub fn adi_dump(adf : &AdiFile) -> String
     return output
 }
 
+#[cfg(test)]
 fn adi_dump_record(rec : &AdiRecord, output: &mut String)
 {
     for field in &rec.adir_fields {
@@ -134,6 +138,7 @@ fn adi_dump_record(rec : &AdiRecord, output: &mut String)
 //
 // High-level function for parsing an ADI file represented in the given string.
 //
+#[cfg(test)]
 pub fn adi_parse_string(source: &str) -> Result<AdiFile, AdifParseError>
 {
     let mut source_reader = Cursor::new(source);

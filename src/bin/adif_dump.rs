@@ -1,18 +1,15 @@
 //
-// src/bin/adif_dump.rs: driver program for ADIF parser.  For now, this just
-// parses the given ADI file and dumps the result.
+// src/bin/adif_dump.rs: dumps contents of an ADIF file
 //
 
 use std::env;
+use std::fs;
 use std::process;
 
 extern crate adif;
 
-// XXX This doesn't seem like the right way to do this.
-#[path = "../cli.rs"]
-mod cli;
-
-fn main() {
+fn main()
+{
     let argv : Vec<String> = env::args().collect();
     let progname = if argv.len() > 0 { &argv[0] } else { "adif" };
 
@@ -25,7 +22,9 @@ fn main() {
     }
 
     let filename = &argv[1];
-    match cli::process_file(filename) {
+    let which = adif::AdifDumpWhichRecords::ADR_ONE;
+
+    match adif_dump_file(filename, which) {
         Ok(()) => (),
         Err(errmsg) => fatal(progname, &errmsg)
     }
@@ -42,4 +41,20 @@ fn fatal(progname: &str, message: &str)
 {
     eprintln!("{}: {}", progname, message);
     process::exit(1);
+}
+
+pub fn adif_dump_file(filename: &str, which: adif::AdifDumpWhichRecords) ->
+    Result<(), String>
+{
+    let mut file = match fs::File::open(filename) {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(format!("open \"{}\": {}", filename, error))
+        }
+    };
+
+    match adif::adif_parse(filename, &mut file) {
+        Ok(adif) => Ok(adif::adif_dump(adif, which)),
+        Err(err) => Err(format!("{}", err))
+    }
 }

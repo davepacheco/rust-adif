@@ -35,6 +35,13 @@ pub struct AdifFile {
     pub adif_records : Vec<AdifRecord>,     // list of records in the file
 }
 
+#[allow(non_camel_case_types)]
+pub enum AdifDumpWhichRecords {
+    ADR_NONE,
+    ADR_ONE,
+    ADR_ALL
+}
+
 impl fmt::Debug for AdifFile {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "ADIF file:  {}\n", self.adif_label)?;
@@ -52,14 +59,25 @@ impl fmt::Debug for AdifFile {
                 Some(v) => format!("version \"{}\"", v),
                 None => String::from("unknown version")
             })?;
-        write!(f, "Total records: {}\n", self.adif_records.len())?;
+        write!(f, "Total records: {}\n", self.adif_records.len())
+    }
+}
 
-        if self.adif_records.len() == 0 {
-            return Ok(());
+pub fn adif_dump(adif: AdifFile, which: AdifDumpWhichRecords)
+{
+    print!("{:?}", adif);
+
+    match which {
+        AdifDumpWhichRecords::ADR_NONE => (),
+        AdifDumpWhichRecords::ADR_ONE => {
+            print!("Example record:\n");
+            print!("{:?}\n", adif.adif_records[0]);
         }
-
-        write!(f, "Example record:\n")?;
-        write!(f, "{:?}\n", self.adif_records[0])
+        AdifDumpWhichRecords::ADR_ALL => {
+            for rec in &adif.adif_records {
+                print!("{:?}\n\n", rec);
+            }
+        }
     }
 }
 

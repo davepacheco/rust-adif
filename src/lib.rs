@@ -27,6 +27,12 @@ mod adif;
 mod adifutil;
 
 //
+// TODO decide whether there's a cleaner way to structure this.
+//
+pub use adif::AdifDumpWhichRecords;
+pub use adif::adif_dump;
+
+//
 // AdifParseError is used to represent any sort of operational error we may
 // encounter during parsing.
 //
@@ -61,41 +67,9 @@ impl fmt::Display for AdifParseError {
     }
 }
 
-//
-// These entry points are provided for now just for testing.
-//
-pub fn adif_testparse_adi(label: &str, source : &mut io::Read) ->
-    Result<String, String>
+pub fn adif_parse(label: &str, source: &mut io::Read) ->
+    Result<adif::AdifFile, AdifParseError>
 {
-    // TODO flesh out
-    let mut rv = String::new();
-    match adi::adi_parse(source) {
-        Ok(r) => {
-            rv.push_str(&format!("{}", adi::adi_dump(&r)));
-            rv.push_str("\n\n");
-            match adif::adif_parse_adi(label, &r) {
-                Ok(adif) => {
-                    rv.push_str(&format!("{:?}\n", adif));
-                }
-                Err(e) => {
-                    rv.push_str(&format!("{}", e));
-                }
-            }
-        }
-        Err(e) => {
-            rv.push_str(&format!("{}", e));
-            return Err(rv);
-        }
-    }
-
-    Ok(rv)
-}
-
-pub fn adif_testparse_adi_string(source : &str) -> Result<String, String>
-{
-    // TODO should remove adi_parse_string() and do that work here instead?
-    match adi::adi_parse_string(source) {
-        Ok(r) => Ok(format!("{}", adi::adi_dump(&r))),
-        Err(e) => Err(format!("{}", e))
-    }
+    let adi = adi::adi_parse(source)?;
+    adif::adif_parse_adi(label, &adi)
 }
