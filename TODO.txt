@@ -2,9 +2,9 @@ Current status:
 - have ADI importer
 - have ADIF layer that turns that into AdifFile
 - have simple adif_dump program
+- have primordial adif_diff program
 
 General TODO (not necessarily in this order):
-- adif_dump could have flags for the list of fields to dump
 - adif_diff could have flags for the list of fields to compare
 - Features:
   - Application-specific fields
@@ -24,7 +24,6 @@ General TODO (not necessarily in this order):
   - Clean up internal interfaces
 - CLI programs:
   - adif_report: summarize QSOs in a file (e.g., by country, county, ...)
-  - adif_diff? diff two ADIF files
   - adi_to_adx: would this be hard?
 - Add Rust documentation
 - Add Rust tests!

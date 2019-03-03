@@ -63,7 +63,8 @@ impl fmt::Debug for AdifFile {
     }
 }
 
-pub fn adif_dump(adif: AdifFile, which: AdifDumpWhichRecords)
+pub fn adif_dump(adif: AdifFile, which: AdifDumpWhichRecords,
+    colspec : &Option<Vec<&String>>)
 {
     print!("{:?}", adif);
 
@@ -71,14 +72,32 @@ pub fn adif_dump(adif: AdifFile, which: AdifDumpWhichRecords)
         AdifDumpWhichRecords::ADR_NONE => (),
         AdifDumpWhichRecords::ADR_ONE => {
             print!("Example record:\n");
-            print!("{:?}\n", adif.adif_records[0]);
-        }
+            adif_dump_one(&adif.adif_records[0], colspec);
+        },
         AdifDumpWhichRecords::ADR_ALL => {
             for rec in &adif.adif_records {
-                print!("{:?}\n\n", rec);
+                adif_dump_one(rec, &colspec);
             }
         }
     }
+}
+
+fn adif_dump_one(rec : &AdifRecord, colspec: &Option<Vec<&String>>)
+{
+    match colspec {
+        None => print!("{:?}\n\n", rec),
+        Some(colnames) => {
+            for colname in colnames {
+                let val = rec.adir_field_values.get(*colname);
+                print!("{}\t", match val {
+                    None => "-",
+                    Some(v) => v
+                });
+            }
+        }
+    }
+
+    print!("\n");
 }
 
 pub struct AdifRecord {
