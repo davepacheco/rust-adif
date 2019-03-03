@@ -30,6 +30,7 @@ mod adifutil;
 // TODO decide whether there's a cleaner way to structure this.
 //
 pub use adif::AdifDumpWhichRecords;
+pub use adif::AdifRecord;
 pub use adif::adif_dump;
 
 //

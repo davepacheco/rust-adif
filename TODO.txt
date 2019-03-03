@@ -4,6 +4,8 @@ Current status:
 - have simple adif_dump program
 
 General TODO (not necessarily in this order):
+- adif_dump could have flags for the list of fields to dump
+- adif_diff could have flags for the list of fields to compare
 - Features:
   - Application-specific fields
     - This should probably store header metadata as it processes the header, then
