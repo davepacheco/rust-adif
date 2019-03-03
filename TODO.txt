@@ -1,7 +1,7 @@
 Current status:
 - have ADI importer
 - have ADIF layer that turns that into AdifFile
-- have simple adif_dump program
+- have simple adif_dump program with basic filtering and output fields
 - have primordial adif_diff program
 
 General TODO (not necessarily in this order):

@@ -64,6 +64,7 @@ impl fmt::Debug for AdifFile {
 }
 
 pub fn adif_dump(adif: AdifFile, which: AdifDumpWhichRecords,
+    filterspec : &Option<Vec<(String, String)>>,
     colspec : &Option<Vec<&String>>)
 {
     print!("{:?}", adif);
@@ -72,18 +73,39 @@ pub fn adif_dump(adif: AdifFile, which: AdifDumpWhichRecords,
         AdifDumpWhichRecords::ADR_NONE => (),
         AdifDumpWhichRecords::ADR_ONE => {
             print!("Example record:\n");
-            adif_dump_one(&adif.adif_records[0], colspec);
+            adif_dump_one(&adif.adif_records[0], &None, colspec);
         },
         AdifDumpWhichRecords::ADR_ALL => {
             for rec in &adif.adif_records {
-                adif_dump_one(rec, &colspec);
+                adif_dump_one(rec, filterspec, &colspec);
             }
         }
     }
 }
 
-fn adif_dump_one(rec : &AdifRecord, colspec: &Option<Vec<&String>>)
+fn adif_dump_one(rec : &AdifRecord, filterspec: &Option<Vec<(String, String)>>,
+    colspec: &Option<Vec<&String>>)
 {
+    if let Some(filters) = filterspec {
+        for filter in filters {
+            let key = &filter.0;
+            let filterval = &filter.1;
+            let recordentry = rec.adir_field_values.get(key);
+            match recordentry {
+                None => {
+                    if filterval.len() > 0 {
+                        return;
+                    }
+                },
+                Some(recordval) => {
+                    if filterval != recordval {
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
     match colspec {
         None => print!("{:?}\n\n", rec),
         Some(colnames) => {
